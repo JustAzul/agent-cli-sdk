@@ -25,7 +25,7 @@ vet: cache
 	$(DOCKER_GO) go vet ./...
 
 fmt: cache
-	$(DOCKER_GO) gofmt -l -w .
+	$(DOCKER_GO) gofmt -l -w cmd internal test tools
 
 build: cache
 	$(DOCKER_GO) go build -trimpath -ldflags '$(LDFLAGS)' -o build/agentcli ./cmd/agentcli
