@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -79,42 +78,7 @@ func Append(home string, rec Record, at time.Time, opt Options) error {
 	if err != nil {
 		return fmt.Errorf("encoding the record: %w", err)
 	}
-	line = append(line, '\n')
-
-	dir := filepath.Join(home, "telemetry")
-	if err := os.MkdirAll(dir, dirMode); err != nil {
-		return err
-	}
-	lock, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_RDWR|os.O_CREATE, fileMode)
-	if err != nil {
-		return err
-	}
-	defer lock.Close()
-	wait := opt.LockWait
-	if wait <= 0 {
-		wait = LockWait
-	}
-	if err := lockExclusive(lock, wait); err != nil {
-		return err
-	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-
-	f, err := os.OpenFile(filepath.Join(dir, at.UTC().Format("2006-01")+".jsonl"), os.O_RDWR|os.O_APPEND|os.O_CREATE, fileMode)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	torn, err := endsMidLine(f)
-	if err != nil {
-		return err
-	}
-	if torn {
-		line = append([]byte{'\n'}, line...)
-	}
-	if _, err := f.Write(line); err != nil {
-		return err
-	}
-	return nil
+	return AppendLine(home, line, at, opt)
 }
 
 // endsMidLine reports whether the file is non-empty and its last byte is not a

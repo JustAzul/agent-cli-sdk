@@ -13,7 +13,7 @@ DOCKER_GO = docker run --rm -u $$(id -u):$$(id -g) \
   -e GOFLAGS=-buildvcs=false -e CGO_ENABLED=0 \
   $(GO_IMAGE)
 
-.PHONY: test vet fmt build cache dist
+.PHONY: test vet vet-darwin fmt build cache dist
 
 cache:
 	mkdir -p $(CACHE_DIR)/mod $(CACHE_DIR)/build
@@ -23,6 +23,11 @@ test: cache
 
 vet: cache
 	$(DOCKER_GO) go vet ./...
+
+# Compile-and-vet check for the darwin-only files; they cannot run here.
+vet-darwin: cache
+	$(DOCKER_GO) env GOOS=darwin GOARCH=arm64 go vet ./...
+	$(DOCKER_GO) env GOOS=darwin GOARCH=amd64 go vet ./...
 
 fmt: cache
 	$(DOCKER_GO) gofmt -l -w cmd internal test tools

@@ -94,7 +94,7 @@ func writeRun(st *store.Store, a admission, turn int) (store.State, error) {
 		Model: nullable(e.Model), ModelSource: e.ModelSource,
 		Effort: nullable(e.Effort), EffortSource: e.EffortSource,
 		Sandbox: nullable(e.Sandbox), SandboxSource: e.SandboxSource,
-		Cwd: a.cwd, Source: f.source, SessionID: f.sessionID,
+		Cwd: a.cwd, Source: f.source, SessionID: f.sessionID, TimeoutS: timeoutSeconds(f.timeoutS),
 		CleanSentinel: f.cleanSentinel, MaterialLabel: f.materialLabel,
 		Attrs: f.attrs.object(), Passthrough: passthrough, Plan: a.plan,
 	}
@@ -117,4 +117,12 @@ func nullable(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// timeoutSeconds is the recorded timeout: null when the run has none.
+func timeoutSeconds(n int) *int {
+	if n <= 0 {
+		return nil
+	}
+	return &n
 }

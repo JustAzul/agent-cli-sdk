@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 )
 
@@ -23,9 +24,24 @@ type turnFlags struct {
 	promptFile    string
 	cleanSentinel string
 	materialLabel string
+	timeoutS      int // 0: no timeout
 	json          bool
 	dryRun        bool
 	attrs         attrList
+}
+
+// timeoutFlag parses --timeout: a positive whole number of seconds.
+type timeoutFlag struct{ seconds *int }
+
+func (f timeoutFlag) String() string { return "" }
+
+func (f timeoutFlag) Set(raw string) error {
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return fmt.Errorf("--timeout needs a positive whole number of seconds, got %q", raw)
+	}
+	*f.seconds = n
+	return nil
 }
 
 // attrList collects --attr and --attr-json values; a later duplicate key
@@ -130,6 +146,7 @@ func parseTurnArgs(ctx *Context, spec turnSpec, args []string) (p parsedTurn, ex
 	fs.StringVar(&f.promptFile, "prompt-file", "", "read the prompt from a file")
 	fs.StringVar(&f.cleanSentinel, "clean-sentinel", "", "output text that classifies the run as clean")
 	fs.StringVar(&f.materialLabel, "material-label", "ok", "outcome label for material output")
+	fs.Var(timeoutFlag{&f.timeoutS}, "timeout", "kill the provider after this many seconds (default: no timeout)")
 	fs.BoolVar(&f.json, "json", false, "print one JSON object instead of the output path")
 	fs.Var(attrFlag{list: &f.attrs}, "attr", "attribute key=value (repeatable)")
 	fs.Var(attrFlag{list: &f.attrs, asJSON: true}, "attr-json", "attribute key=<json> (repeatable)")

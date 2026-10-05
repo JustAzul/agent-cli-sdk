@@ -18,8 +18,12 @@ import (
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "__sleeper" {
-		// Grandchild started by FAKECODEX_SPAWN_CHILD: sleeps, then goes away.
+	if len(os.Args) > 1 && (os.Args[1] == "__sleeper" || os.Args[1] == "__holder") {
+		// Grandchild started by FAKECODEX_SPAWN_CHILD or FAKECODEX_PIPE_HOLDER:
+		// sleeps, then goes away. FAKECODEX_CHILD_IGNORE_TERM=1 makes it ignore SIGTERM.
+		if os.Getenv("FAKECODEX_CHILD_IGNORE_TERM") == "1" {
+			signal.Ignore(syscall.SIGTERM)
+		}
 		time.Sleep(60 * time.Second)
 		return
 	}
@@ -42,6 +46,9 @@ func run() int {
 	}
 	if os.Getenv("FAKECODEX_SPAWN_CHILD") == "1" {
 		spawnChild()
+	}
+	if path := os.Getenv("FAKECODEX_PIPE_HOLDER"); path != "" {
+		spawnPipeHolder(path)
 	}
 
 	var fixture []byte
@@ -100,6 +107,23 @@ func spawnChild() {
 	}
 	cmd := exec.Command(self, "__sleeper")
 	_ = cmd.Start()
+}
+
+// spawnPipeHolder starts a sleeping grandchild in a session of its own, so it
+// leaves the provider's process group, that keeps this process's stdout and
+// stderr open. Its pid is written to pidFile so the test can clean it up.
+func spawnPipeHolder(pidFile string) {
+	self, err := os.Executable()
+	if err != nil {
+		return
+	}
+	cmd := exec.Command(self, "__holder")
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	_ = os.WriteFile(pidFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600)
 }
 
 func outputArg(args []string) string {

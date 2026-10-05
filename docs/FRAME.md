@@ -146,6 +146,8 @@ timeout, clean sentinel, material label, attrs, passthrough) plus the plan.
 
 `status` (`busy`/`idle`) and `resumable` are derived on read, not stored.
 
+A cancel request is the presence of `runs/<run_id>/cancel.request`.
+
 Lock files: `runs/<run_id>/lock`, `conversations/<conversation_id>.lock`,
 `telemetry/.lock`, and the launcher's lock next to the launcher. All use
 `flock(2)` exclusive locks; descriptors are close-on-exec.
@@ -169,6 +171,12 @@ Telemetry records: exactly the FR31 fields for `run`, and
   - `FAKECODEX_SPAWN_CHILD=1`: start a sleeping grandchild in the same group.
   - `FAKECODEX_RECORD`: a path to write `{argv, stdin, env, cwd}` as JSON.
   - `FAKECODEX_VERSION`: the output of `--version`.
+  - `FAKECODEX_PIPE_HOLDER=<pidfile>`: start a `setsid` grandchild that keeps
+    stdout/stderr open and write its pid to the file.
+  - `FAKECODEX_CHILD_IGNORE_TERM=1`: the spawned grandchild ignores SIGTERM.
+- `AGENTCLI_TEST_SHUTDOWN_GRACE_MS` and `AGENTCLI_TEST_SHUTDOWN_DRAIN_MS`
+  shorten the termination grace and the pipe drain for tests. Production
+  defaults are 5 seconds each.
 - Fixtures in `testdata/codex/` are recorded Codex streams with fictitious ids.
   Never put real ids, emails or home paths in the repository.
 
@@ -208,6 +216,12 @@ Telemetry records: exactly the FR31 fields for `run`, and
 - Imported legacy records keep fields that have no run-record name (such as
   `status`) as given; native runs derive `status` from `outcome` on read.
 - A conversation's active-turn marker is cleared only by the run it names.
+- Termination: after SIGTERM to the provider group, SIGKILL follows as soon as
+  the group leader exits or the 5-second grace ends, whichever comes first.
+  On timeout or cancellation `provider_exit` is the observed wait status
+  (for example 143 or 137); `sdk_status` is `timeout` or `cancelled`
+  (`cancelled` for both 130 and 128+n). `--timeout` takes a positive integer
+  of seconds.
 
 ## Rules for every slice
 

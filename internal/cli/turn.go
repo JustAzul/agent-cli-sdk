@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"io"
+	"time"
 
 	"github.com/JustAzul/agent-cli-sdk/internal/profile"
 	"github.com/JustAzul/agent-cli-sdk/internal/provider"
@@ -67,13 +68,15 @@ func runTurn(ctx *Context, t turn) int {
 	res, err := runner.Run(runner.Job{
 		Store: t.st, Provider: t.prov, Plan: plan, Prompt: t.prompt, Env: ctx.Env, State: state,
 		CleanSentinel: p.cleanSentinel, MaterialLabel: p.materialLabel,
-		Warn: func(msg string) { ctx.Warnf("%s", msg) }, Now: ctx.Now,
+		Timeout:  time.Duration(p.timeoutS) * time.Second,
+		Shutdown: runner.ShutdownFromEnv(ctx.Getenv),
+		Warn:     func(msg string) { ctx.Warnf("%s", msg) }, Now: ctx.Now,
 		Record: telemetry.Record{
 			Provider: p.provider, Command: t.command, Scenario: p.scenario,
 			Model: nullable(t.eff.Model), ModelSource: t.eff.ModelSource,
 			Effort: nullable(t.eff.Effort), EffortSource: t.eff.EffortSource,
 			Sandbox: nullable(t.eff.Sandbox), Source: p.source, SessionID: nullable(p.sessionID),
-			Cwd: t.cwd, Attrs: p.attrs.object(),
+			TimeoutS: timeoutSeconds(p.timeoutS), Cwd: t.cwd, Attrs: p.attrs.object(),
 		},
 	})
 	if err != nil {
