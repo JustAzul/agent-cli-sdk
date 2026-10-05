@@ -1,0 +1,85 @@
+{
+  "total": 22,
+  "empty": false,
+  "span": {
+    "first": "2026-07-14T10:00:00Z",
+    "last": "2026-09-02T06:00:00Z"
+  },
+  "by_source": {
+    "hook-post-commit": 9,
+    "hook-stop": 5,
+    "skill": 4,
+    "hook-stop-claude-md": 3,
+    "unknown": 1
+  },
+  "by_source_status": {
+    "skill": {
+      "ok": 2,
+      "error": 1,
+      "empty-output": 1
+    },
+    "hook-post-commit": {
+      "ok": 8,
+      "error": 1
+    },
+    "hook-stop": {
+      "no-status": 1,
+      "empty-output": 1,
+      "ok": 3
+    },
+    "hook-stop-claude-md": {
+      "ok": 2,
+      "error": 1
+    },
+    "unknown": {
+      "ok": 1
+    }
+  },
+  "instrumentation": {
+    "with_status": 21,
+    "missing_status": 1
+  },
+  "reliability": {
+    "with_status": 16,
+    "ok": 13,
+    "error": 2,
+    "empty_output": 1
+  },
+  "outcomes": {
+    "clean": 5,
+    "findings": 5,
+    "no-outcome": 3,
+    "error": 2,
+    "empty": 1,
+    "appended": 1
+  },
+  "duration_ms": {
+    "count": 22,
+    "min": 5,
+    "median": 38000,
+    "max": 98000
+  },
+  "findings": {
+    "instrumented_reviews": 8,
+    "reviews_with_findings": 4,
+    "reviews_clean": 4,
+    "severity_totals": {
+      "total": 7,
+      "critical": 1,
+      "high": 2,
+      "medium": 3,
+      "low": 1,
+      "violations": 1
+    }
+  },
+  "review_findings_proxy": {
+    "total": 13,
+    "succeeded": 10,
+    "failed_or_empty": 3,
+    "clean_proxy": 5,
+    "with_output_proxy": 5,
+    "median_output_bytes": 41,
+    "note": "output_bytes is a PROXY for findings volume over SUCCESSFUL runs; falls back to this when the structured findings field is absent (records predating schema enrichment)"
+  },
+  "window_days": null
+}
