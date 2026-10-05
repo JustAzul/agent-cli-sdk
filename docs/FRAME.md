@@ -199,6 +199,15 @@ Telemetry records: exactly the FR31 fields for `run`, and
   the output file is missing. `ts` is the run's start at second resolution.
 - The provider version probe runs beside the provider, is bounded at 5 seconds
   and keeps the first non-empty stdout line.
+- Fold: an annotation that precedes its run record in append order (a running
+  job annotated before it finishes) is applied once that record is read; an
+  annotation whose run never appears creates nothing. Duplicate run records
+  for one `run_id` keep the first.
+- `annotate` exits 70 when the lock or the write fails: the annotation is the
+  command's whole job, unlike a run's telemetry.
+- Imported legacy records keep fields that have no run-record name (such as
+  `status`) as given; native runs derive `status` from `outcome` on read.
+- A conversation's active-turn marker is cleared only by the run it names.
 
 ## Rules for every slice
 
