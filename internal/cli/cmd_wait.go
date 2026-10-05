@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/JustAzul/agent-cli-sdk/internal/store"
@@ -67,6 +68,9 @@ func runWait(ctx *Context, args []string) int {
 		return code
 	}
 
+	if !st.RunExists(state.RunID) {
+		return ctx.Fail(ExitNotFound, "no run %q", state.RunID)
+	}
 	exit := ExitInternal
 	if state.ExitCode != nil {
 		exit = *state.ExitCode
@@ -94,6 +98,9 @@ func awaitTerminal(ctx *Context, st *store.Store, state store.State, expired <-c
 		case <-tick.C:
 		}
 		next, err := observeRun(ctx, st, state.RunID)
+		if errors.Is(err, os.ErrNotExist) {
+			return state, ctx.Fail(ExitNotFound, "no run %q", state.RunID)
+		}
 		if err != nil {
 			return state, ctx.Fail(ExitInternal, "reading run %s: %v", state.RunID, err)
 		}

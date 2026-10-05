@@ -21,7 +21,8 @@ func runResultCmd(ctx *Context, args []string) int {
 	if err != nil {
 		return ctx.Fail(ExitInternal, "%v", err)
 	}
-	state, code := loadRun(ctx, store.Open(home), args[0])
+	st := store.Open(home)
+	state, code := loadRun(ctx, st, args[0])
 	if code != 0 {
 		return code
 	}
@@ -30,6 +31,9 @@ func runResultCmd(ctx *Context, args []string) int {
 	}
 	f, err := os.Open(state.OutputPath)
 	if errors.Is(err, os.ErrNotExist) {
+		if !st.RunExists(state.RunID) {
+			return ctx.Fail(ExitNotFound, "no run %q", state.RunID)
+		}
 		fmt.Fprintf(ctx.Stderr, "agentcli: run %s produced no output file\n", state.RunID)
 		return ExitOK
 	}

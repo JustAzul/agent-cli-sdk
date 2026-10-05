@@ -30,7 +30,17 @@ Unless stated otherwise:
   - `agentcli wait <run_id>` from another shell exits 0 and its last stdout line equals `output_path`.
   - The record has `background: true`.
 - [ ] **job last line (FR6):** `agentcli exec --background "q"` (no `--json`) → the last stdout line equals the run id.
-- [ ] **status listing (FR7):** two runs under `--session-id S` and one under `S2` → `agentcli status --session-id S --json` lists exactly the two `S` runs, newest first.
+- [ ] **status listing (FR7, FR62):** two runs under `--session-id S` and one under `S2` → `agentcli status --session-id S --json` lists exactly the two `S` runs, newest first.
+- [ ] **prune summary (FR60):** two runs, one finished 40 days ago and one fresh → `agentcli prune --json` exits 0 with `removed: 1`, `kept: 1`, `skipped: 0`, `older_than_days: 30` and `bytes_freed` greater than 0. The old run directory is gone, the fresh one stays, and the text form prints `removed 1, kept 1, skipped 0, freed <n> bytes`.
+- [ ] **prune retention window (FR60):** `--older-than 60` keeps the 40-day-old run, `--older-than 10` removes it, `AGENTCLI_RETENTION_DAYS=60` keeps it, and the flag wins over the variable. `--older-than 0` removes every finished run.
+- [ ] **prune dry run (FR60):** `prune --dry-run` prints `would remove 1, …` (JSON: `dry_run: true`, `removed: 1`), removes nothing and creates no lock file in any run directory.
+- [ ] **prune leaves history alone (FR60):** after a prune, the telemetry records and the conversation files are byte-for-byte unchanged.
+- [ ] **index on admission (FR62):** `exec`, `review`, `send` and the two `--background` forms with `--session-id S` → `index/sessions/S` lists their run ids in admission order, one per line. A run with no session id is listed in `index/sessions/_`, and `status` with no session id lists it.
+- [ ] **session status reads one index (FR62):** a run that no index lists is not shown by `status --session-id X`, even when its request says session `X`. A session with no index lists no runs.
+- [ ] **conversation sources (FR63):** `exec --scenario second-opinion --model m1` → the conversation's `defaults` hold `model_source: flag`, `effort_source: profile`, `sandbox_source: profile`.
+- [ ] **send after the first turn is pruned (FR60, FR63):** prune removes turn 1 of a conversation started with `--model m1` → `send <conversation_id>` runs turn 2 with `model: m1`, `model_source: flag`, `effort_source: profile`. `send <turn-1 run id>` exits 4.
+- [ ] **auto prune (FR61):** `prune --auto` on a home with an old run → exit 0, nothing on stdout or stderr, the old run is gone, and `prune.stamp` holds the time of the pass.
+- [ ] **hook command (FR61):** the plugin's SessionStart hook command is `"${CLAUDE_PLUGIN_ROOT}"/bin/agentcli link --quiet; "${CLAUDE_PLUGIN_ROOT}"/bin/agentcli prune --auto` with timeout 5.
 - [ ] **result (FR7):** `agentcli result <run_id>` → prints the content of `output.md`.
 - [ ] **conversations (FR7):** after exec + send → `agentcli conversations --json` shows the conversation with provider `codex`, 2 turns, status `idle` and `resumable: true`.
 - [ ] **attrs at dispatch (FR4, FR31, US6):** `--attr ticket=2056 --attr-json review.findings='{"total":1}'` → the record's `attrs` equals `{"ticket":"2056","review.findings":{"total":1}}`.
@@ -57,7 +67,7 @@ Unless stated otherwise:
 - [ ] **job survives its launcher (FR25):** start a job from a shell, then kill that shell's whole process group → the job still reaches `done`, and `wait` from a new shell exits 0.
 - [ ] **namespaced attrs (FR36):** `--attr-json review.findings='{"total":2}'` → stored under the literal key `review.findings`, not nested as `review → findings`.
 - [ ] **marketplace manifest (FR39):** `claude plugin validate` on the repository root passes. The manifest lists one plugin `agent-cli` with source `github`, `ref: dist` and no `sha`.
-- [ ] **dist content (FR40, FR42):** the published `dist` tree contains the plugin manifest without `version`, `bin/agentcli`, four binaries, `SHA256SUMS` (all four checksums verify), the skill, the mod, commands, and a hooks file whose SessionStart runs `agentcli link --quiet`.
+- [ ] **dist content (FR40, FR42):** the published `dist` tree contains the plugin manifest without `version`, `bin/agentcli`, four binaries, `SHA256SUMS` (all four checksums verify), the skill, the mod, commands, and a hooks file whose SessionStart runs `agentcli link --quiet; agentcli prune --auto`.
 - [ ] **repository identity (FR45):** `git log --format='%an <%ae>'` on the public repo shows only the owner's global git identity. LICENSE is MIT with the owner's name.
 - [ ] **mods API check (FR49):** before mod code is written, the installed build's mod type definitions are read, and the registration, tool, timer, toast, prompt-submit, status and store calls used by FR46–FR48 exist with the expected shapes. Any mismatch is reported as a blocker.
 - [ ] **dispatch skill (FR50):** the skill text covers scenarios/profiles, tools vs CLI, foreground vs job, continuing conversations, reading results, attribution and open disagreement, no patch application outside delegation, and cost. The carried-over trigger evals pass with the renamed skill.
@@ -112,6 +122,22 @@ Unless stated otherwise:
 - [ ] **PII guard (FR44):** the test generates, at run time, a tracked file holding a webmail address → the CI test fails. The same for a generated `/home/<user>/…` path and for a UUID not on the fixture allowlist. Noreply/example emails pass. No such sample is committed literally.
 - [ ] **hook keeps artifacts (FR52):** a migrated review hook gets a clean review → the hook stays silent and the run's `output.md` still exists afterwards. The reflection hook's `no new entry` run carries `reflection.applied: false`, and a run that wrote carries `true`.
 - [ ] **hook env passthrough (FR12, FR52):** the reflection hook runs with its inherited lock marker set → the fake provider observes that environment variable with the same value.
+- [ ] **prune usage errors (FR60):** `prune --older-than x`, `--older-than -1`, `prune some-id`, an unknown flag and `AGENTCLI_RETENTION_DAYS=soon` → exit 2 (JSON: `sdk_status: usage_error`), and no run is removed.
+- [ ] **prune qualification (FR60):** a home with old `done`, `failed`, `cancelled`, `timeout` and `lost` runs, a fresh run, a `running` run, a `queued` run, a terminal run with no `ended_at` or an unparseable one, a run directory with no `state.json`, and one with a malformed `state.json` → only the five old terminal runs are removed. Result: `removed: 5`, `kept: 3`, `skipped: 4`, and `bytes_freed` equal to the size of the removed directories.
+- [ ] **prune held lock (FR60):** an old terminal run whose run lock another process holds → kept, counted as kept, directory intact.
+- [ ] **prune re-check under the lock (FR60):** between the first look and taking the lock, a run turns `running`, or its `ended_at` becomes recent, or a conversation names it as the active turn → the run is kept.
+- [ ] **prune active marker (FR60):** an old terminal run that some conversation's `active_run_id` names → kept, and a different old run in the same home is removed.
+- [ ] **prune index tidy (FR62):** a session index whose runs were all removed is deleted; an index that still has a run keeps only the ids whose run directory exists.
+- [ ] **prune leftovers (FR60):** a `runs/.prune-*` directory left by an interrupted pass is deleted by the next pass and is never listed as a run.
+- [ ] **auto prune once a day (FR61):** `prune.stamp` one hour or 23 hours old → `prune --auto` does nothing and leaves the stamp. 25 hours old, in the future, or unreadable → it prunes and rewrites the stamp.
+- [ ] **auto prune opt-out (FR61):** `AGENTCLI_NO_PRUNE=1 agentcli prune --auto` → exit 0, nothing printed, no run removed, no stamp written.
+- [ ] **auto prune on an empty home (FR61):** the home directory does not exist → exit 0, nothing printed, the home is not created.
+- [ ] **auto prune already running (FR61):** another process holds `prune.lock` → exit 0 quietly, no run removed, no stamp written.
+- [ ] **auto prune dry run (FR61):** `prune --auto --dry-run --json` reports what would go (`ran: true`), removes nothing and writes no stamp. `--auto --json` on a gated day prints one object with `ran: false`.
+- [ ] **auto prune time budget (FR61):** twelve old runs and a budget shorter than the time to handle them (`AGENTCLI_TEST_PRUNE_BUDGET_MS`, `AGENTCLI_TEST_PRUNE_STEP_MS`) → exit 0, silent, some runs removed and some left. A second pass the same day changes nothing; with the stamp 25 hours old, the next pass removes the rest.
+- [ ] **conversation without recorded sources (FR63):** a conversation record with no `*_source` fields and a first turn whose `request.json` exists → `send` takes the sources from that request. With the request gone → `profile`.
+- [ ] **session ids are file-safe (FR62):** a session id with a path separator, `..`, a leading dot, `_` or 300 characters → indexed in a file inside `index/sessions/`, never shared with another session or with the empty-session key.
+- [ ] **concurrent index appends (FR62):** forty admissions to one session at once → forty intact lines.
 - [ ] **mod notice size (FR47):** output of 20 KiB → the notice contains the first 8 KiB and the output path.
 
 ---
@@ -143,6 +169,10 @@ Unless stated otherwise:
 - [ ] **telemetry lock held (FR30):** another process holds the telemetry lock for 10 s → the run finishes within the 5 s lock wait and skips the record with a warning; the exit code is unchanged.
 - [ ] **unknown ids (FR7, FR32):** `status`, `wait`, `result`, `cancel`, `send` and `annotate` with a nonexistent id → exit 4.
 - [ ] **unsupported capability (FR11):** a test provider declaring no review support → `agentcli review --provider testprov --base main` exits 2 naming the capability.
+- [ ] **pruned ids are not found (FR60):** after a prune, `status`, `wait`, `result`, `cancel`, `annotate` (by run id and by output path) and `send <run id>` on a pruned run all exit 4, and `status --session-id S` no longer lists it.
+- [ ] **run vanishes mid-read (FR60):** a `status`, `wait`, `result`, `cancel`, `annotate` or `send <run id>` whose run directory is removed after it first read the run (test gate `AGENTCLI_TEST_READ_GATE`) exits 4; `result` does not report success with no output.
+- [ ] **auto prune failure is loud (FR61):** the `runs` directory is read-only so a removal fails → `prune --auto` exits 70 and prints the reason on stderr.
+- [ ] **indexed run directory gone (FR62):** the index lists a run whose directory was deleted → `status --session-id S` skips it without a warning and lists the others.
 - [ ] **CI stale publish (FR40):** the dist workflow run for commit A finishes after commit B landed → the HEAD check fails and `dist` is not updated by A.
 
 ---
@@ -169,6 +199,7 @@ Unless stated otherwise:
 - [ ] **large prompt (FR1, FR21):** a 2 MiB prompt via stdin, foreground and background → delivered intact (byte-equal at the fake), no pipe deadlock.
 - [ ] **large output (FR27):** a 5 MiB output file → `result` prints it fully; `output_bytes` is correct.
 - [ ] **stderr tail bound (FR27):** the fake writes 10 MiB to stderr → `stderr.tail` is ≤ 64 KiB and holds the last bytes.
+- [ ] **status polling cost is flat (FR62):** 200 run directories of other sessions, each with an unreadable `state.json`, plus one indexed run of session X → `status --session-id X` lists that run, exits 0 and prints no warning: the other directories were never opened.
 - [ ] **telemetry volume (FR34, FR35):** a month file with 20,000 records → `runs --all` and `stats --all` complete and report all records. Record their wall time as a baseline.
 - [ ] **zero runtime dependencies (success metric, US5):** in a minimal container with only `/bin/sh`, coreutils and the fake provider (no Go, Python, Node, jq) → the plugin's shim and binary run exec, review, send, background, wait, runs and stats successfully.
 

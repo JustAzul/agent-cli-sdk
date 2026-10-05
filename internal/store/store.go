@@ -98,7 +98,8 @@ func (s *Store) ReadRequest(runID string, v any) error {
 }
 
 // RunIDs lists the ids of the run directories under the home, in no
-// particular order. A home with no runs yet lists none.
+// particular order. A home with no runs yet lists none. A directory whose name
+// starts with a dot is never a run (no run id may), so it is not listed.
 func (s *Store) RunIDs() ([]string, error) {
 	entries, err := os.ReadDir(filepath.Join(s.Home, "runs"))
 	if errors.Is(err, os.ErrNotExist) {
@@ -109,7 +110,7 @@ func (s *Store) RunIDs() ([]string, error) {
 	}
 	var ids []string
 	for _, e := range entries {
-		if e.IsDir() {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
 			ids = append(ids, e.Name())
 		}
 	}

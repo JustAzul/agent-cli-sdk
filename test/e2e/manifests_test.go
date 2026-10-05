@@ -56,7 +56,11 @@ func TestMarketplaceManifest(t *testing.T) {
 	}
 }
 
-func TestHooksRunLinkOnSessionStart(t *testing.T) {
+// sessionStartCommand is the SessionStart hook: link the launcher, then prune
+// automatically.
+const sessionStartCommand = `"${CLAUDE_PLUGIN_ROOT}"/bin/agentcli link --quiet; "${CLAUDE_PLUGIN_ROOT}"/bin/agentcli prune --auto`
+
+func TestHooksRunLinkThenPruneOnSessionStart(t *testing.T) {
 	m := repoJSON(t, "plugin/hooks/hooks.json")
 	groups, _ := m["hooks"].(map[string]any)["SessionStart"].([]any)
 	if len(groups) != 1 {
@@ -67,7 +71,7 @@ func TestHooksRunLinkOnSessionStart(t *testing.T) {
 		t.Fatalf("SessionStart hooks = %v", hooks)
 	}
 	h := hooks[0].(map[string]any)
-	if h["type"] != "command" || h["command"] != `"${CLAUDE_PLUGIN_ROOT}"/bin/agentcli link --quiet` || h["timeout"] != float64(5) {
+	if h["type"] != "command" || h["command"] != sessionStartCommand || h["timeout"] != float64(5) {
 		t.Errorf("hook = %v", h)
 	}
 }

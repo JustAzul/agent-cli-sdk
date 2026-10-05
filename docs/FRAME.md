@@ -159,6 +159,13 @@ A cancel request is the presence of `runs/<run_id>/cancel.request`.
 Retention files: `index/sessions/<session id>` (one run id per line, appended at
 admission; an empty session id uses the key `_`) and `prune.stamp` (the time of
 the last `prune --auto`, written under `prune.lock`). Both live under the home.
+Index appends are one O_APPEND write under `index/lock`, which prune also takes
+when it rewrites or deletes an index file. A session id that is not file-safe
+(a path separator, a leading dot, longer than 128, or a literal `_`) is keyed
+`~<first 16 hex of sha256>`. A pruned run is first renamed to
+`runs/.prune-<id>`, then deleted; readers ignore dot-prefixed run directories.
+`prune --json` prints `sdk_status, exit_code, ran, dry_run, older_than_days,
+removed, kept, skipped, failed, bytes_freed, stopped_early`.
 
 `runs/<run_id>/worker.log` is the stderr of a job's worker (0600), bounded to
 its last 64 KiB like `stderr.tail`; runner warnings raised inside a job land

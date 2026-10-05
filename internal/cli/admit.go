@@ -72,7 +72,10 @@ func reserve(st *store.Store, a admission) (int, error) {
 	ts := a.now.Format(time.RFC3339)
 	err := st.ReserveNew(store.Conversation{
 		ConversationID: a.conversationID, Provider: f.provider, Cwd: a.cwd,
-		Defaults:  store.Defaults{Scenario: f.scenario, Model: e.Model, Effort: e.Effort, Sandbox: e.Sandbox},
+		Defaults: store.Defaults{
+			Scenario: f.scenario, Model: e.Model, Effort: e.Effort, Sandbox: e.Sandbox,
+			ModelSource: e.ModelSource, EffortSource: e.EffortSource, SandboxSource: e.SandboxSource,
+		},
 		CreatedAt: ts, UpdatedAt: ts,
 	}, a.runID, a.now)
 	return 1, err

@@ -27,6 +27,7 @@ func loadRun(ctx *Context, st *store.Store, runID string) (store.State, int) {
 		return store.State{}, ctx.Fail(ExitInternal, "reading run %s: %v", runID, err)
 	}
 	ctx.IDs["conversation_id"] = state.ConversationID
+	readerGate(ctx)
 	return state, 0
 }
 

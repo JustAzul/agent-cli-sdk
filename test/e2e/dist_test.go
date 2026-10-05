@@ -122,8 +122,8 @@ func TestDistContent(t *testing.T) {
 	}
 
 	hooks := readJSONFile(t, filepath.Join(out, "hooks", "hooks.json"))
-	if !strings.Contains(fmt.Sprint(hooks), `"${CLAUDE_PLUGIN_ROOT}"/bin/agentcli link --quiet`) {
-		t.Errorf("hooks.json lacks the SessionStart link command: %v", hooks)
+	if !strings.Contains(fmt.Sprint(hooks), sessionStartCommand) {
+		t.Errorf("hooks.json lacks the SessionStart link and prune command: %v", hooks)
 	}
 	if m, _ := hooks["modules"].([]any); len(m) != 1 || m[0] != "./register.js" {
 		t.Errorf("hooks.json modules = %v, want [./register.js]", hooks["modules"])

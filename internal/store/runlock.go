@@ -48,6 +48,29 @@ func (s *Store) LockRun(runID string) (*RunLock, error) {
 	}
 }
 
+// TryLockRun takes the run's exclusive lock only if it is free right now: one
+// attempt, no waiting. A held lock yields ErrRunLockHeld.
+func (s *Store) TryLockRun(runID string) (*RunLock, error) {
+	f, err := os.OpenFile(s.runLockPath(runID), os.O_RDWR|os.O_CREATE, fileMode)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err != syscall.EINTR {
+			break
+		}
+	}
+	switch err {
+	case nil:
+		return &RunLock{f: f}, nil
+	case syscall.EWOULDBLOCK:
+		err = ErrRunLockHeld
+	}
+	f.Close()
+	return nil, err
+}
+
 // Close releases the lock.
 func (l *RunLock) Close() error { return l.f.Close() } // closing the descriptor drops the lock
 

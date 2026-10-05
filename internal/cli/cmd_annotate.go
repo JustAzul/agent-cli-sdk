@@ -58,11 +58,16 @@ func runAnnotate(ctx *Context, args []string) int {
 	if err != nil {
 		return ctx.Fail(ExitInternal, "%v", err)
 	}
-	runID, found := resolveRunTarget(store.Open(home), positional[0])
+	st := store.Open(home)
+	runID, found := resolveRunTarget(st, positional[0])
 	if !found {
 		return ctx.Fail(ExitNotFound, "no run matches %q", positional[0])
 	}
 	ctx.IDs["run_id"] = runID
+	readerGate(ctx)
+	if !st.RunExists(runID) {
+		return ctx.Fail(ExitNotFound, "no run matches %q", positional[0])
+	}
 
 	now := ctx.Now().UTC().Truncate(time.Second)
 	line, err := json.Marshal(annotation{V: telemetry.Version, Kind: "annotation", RunID: runID, TS: now.Format(time.RFC3339), Attrs: attrs.object()})

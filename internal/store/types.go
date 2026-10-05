@@ -25,12 +25,16 @@ type State struct {
 	RunDir         string  `json:"run_dir"`
 }
 
-// Defaults are the first-turn settings a conversation keeps.
+// Defaults are the first-turn settings a conversation keeps, with where each
+// came from. A record written before the sources were kept has them empty.
 type Defaults struct {
-	Scenario string `json:"scenario"`
-	Model    string `json:"model"`
-	Effort   string `json:"effort"`
-	Sandbox  string `json:"sandbox"`
+	Scenario      string `json:"scenario"`
+	Model         string `json:"model"`
+	Effort        string `json:"effort"`
+	Sandbox       string `json:"sandbox"`
+	ModelSource   string `json:"model_source"`
+	EffortSource  string `json:"effort_source"`
+	SandboxSource string `json:"sandbox_source"`
 }
 
 // Conversation is conversations/<conversation_id>.json.

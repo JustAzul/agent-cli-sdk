@@ -36,8 +36,20 @@ func assertTableRow(t *testing.T, r result, wants ...string) {
 }
 
 // seedRunFiles writes a run directory without running anything: its state
-// and request files, plus output.md when output is non-nil.
+// and request files, plus output.md when output is non-nil. The run is also
+// indexed under its request's session, as admission would have.
 func seedRunFiles(t *testing.T, s *sandbox, id string, state, request map[string]any, output []byte) {
+	t.Helper()
+	seedRunFilesUnindexed(t, s, id, state, request, output)
+	key, _ := request["session_id"].(string)
+	if key == "" {
+		key = "_"
+	}
+	appendIndex(t, s.home, key, id)
+}
+
+// seedRunFilesUnindexed is seedRunFiles for a run no session index lists.
+func seedRunFilesUnindexed(t *testing.T, s *sandbox, id string, state, request map[string]any, output []byte) {
 	t.Helper()
 	dir := filepath.Join(s.home, "runs", id)
 	if err := os.MkdirAll(dir, 0o700); err != nil {

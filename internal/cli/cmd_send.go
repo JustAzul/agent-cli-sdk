@@ -39,6 +39,10 @@ func runSend(ctx *Context, args []string) int {
 		return ctx.Fail(ExitInternal, "reading the conversation: %v", err)
 	}
 	ctx.IDs["conversation_id"] = conv.ConversationID
+	readerGate(ctx)
+	if target != conv.ConversationID && !st.RunExists(target) {
+		return ctx.Fail(ExitNotFound, "no conversation or run %q", target)
+	}
 
 	if p.given["provider"] && p.provider != conv.Provider {
 		return ctx.Fail(ExitUsage, "conversation %s uses provider %q, not %q", conv.ConversationID, conv.Provider, p.provider)
@@ -132,11 +136,14 @@ func turnSettings(st *store.Store, conv store.Conversation, p parsedTurn) profil
 
 type settingSources struct{ model, effort, sandbox string }
 
-// firstTurnSources reads where the first turn got its model, effort and
-// sandbox from; a missing or unreadable record counts as the profile.
+// firstTurnSources says where the conversation's model, effort and sandbox
+// came from. The conversation record keeps them; a record written before it
+// did falls back to the first turn's request when that run still exists, and
+// to the profile otherwise.
 func firstTurnSources(st *store.Store, conv store.Conversation) settingSources {
-	out := settingSources{profile.SourceProfile, profile.SourceProfile, profile.SourceProfile}
-	if len(conv.Turns) == 0 {
+	d := conv.Defaults
+	out := settingSources{d.ModelSource, d.EffortSource, d.SandboxSource}
+	if out.model != "" && out.effort != "" && out.sandbox != "" {
 		return out
 	}
 	var req struct {
@@ -144,15 +151,22 @@ func firstTurnSources(st *store.Store, conv store.Conversation) settingSources {
 		EffortSource  string `json:"effort_source"`
 		SandboxSource string `json:"sandbox_source"`
 	}
-	if st.ReadRequest(conv.Turns[0], &req) != nil {
-		return out
+	if len(conv.Turns) > 0 {
+		_ = st.ReadRequest(conv.Turns[0], &req) // a missing record leaves the profile
 	}
-	for dst, src := range map[*string]string{&out.model: req.ModelSource, &out.effort: req.EffortSource, &out.sandbox: req.SandboxSource} {
-		if src != "" {
-			*dst = src
+	out.model = firstNonEmpty(out.model, req.ModelSource, profile.SourceProfile)
+	out.effort = firstNonEmpty(out.effort, req.EffortSource, profile.SourceProfile)
+	out.sandbox = firstNonEmpty(out.sandbox, req.SandboxSource, profile.SourceProfile)
+	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
 		}
 	}
-	return out
+	return ""
 }
 
 // turnCwd is --cwd when given, else the conversation's recorded directory,

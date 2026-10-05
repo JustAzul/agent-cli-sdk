@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"syscall"
 	"time"
 
@@ -59,6 +60,9 @@ func runCancel(ctx *Context, args []string) int {
 func requestCancel(ctx *Context, st *store.Store, state store.State) (store.State, int) {
 	runID := state.RunID
 	if err := st.WriteCancelRequest(runID, ctx.Now()); err != nil {
+		if !st.RunExists(runID) {
+			return state, ctx.Fail(ExitNotFound, "no run %q", runID)
+		}
 		return state, ctx.Fail(ExitInternal, "recording the cancel request: %v", err)
 	}
 	wait := admissionWait(ctx.Getenv)
@@ -66,6 +70,9 @@ func requestCancel(ctx *Context, st *store.Store, state store.State) (store.Stat
 	for {
 		var err error
 		if state, err = observeRun(ctx, st, runID); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return state, ctx.Fail(ExitNotFound, "no run %q", runID)
+			}
 			return state, ctx.Fail(ExitInternal, "reading run %s: %v", runID, err)
 		}
 		switch {

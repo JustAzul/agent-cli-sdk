@@ -26,6 +26,7 @@ CLI itself.
 - [Telemetry](#telemetry)
 - [Inside Claude Code](#inside-claude-code)
 - [Using it from hooks and scripts](#using-it-from-hooks-and-scripts)
+- [Retention](#retention)
 - [Exit codes](#exit-codes)
 - [Safety](#safety)
 - [How it is built](#how-it-is-built)
@@ -41,7 +42,8 @@ The plugin puts `agentcli` on the PATH of Claude's Bash tool. Its
 `SessionStart` hook also keeps a small launcher at `~/.local/bin/agentcli`, so
 your own settings hooks and shell scripts can call it too. The launcher only
 ever points at the installed plugin. It never replaces a file it did not
-write, and `AGENTCLI_NO_LINK=1` turns it off.
+write, and `AGENTCLI_NO_LINK=1` turns it off. The same hook prunes old run
+directories once a day (see [Retention](#retention)).
 
 Requirements:
 - the provider CLI on `PATH` and logged in (`codex` for the Codex provider);
@@ -218,6 +220,26 @@ Useful flags:
 - `--clean-sentinel` and `--material-label` turn "nothing to report" into the
   outcome `clean`.
 - `--run-id` lets a caller pick the id.
+
+## Retention
+
+Run directories hold prompts and outputs, so they are pruned; telemetry is
+never pruned.
+
+```sh
+agentcli prune --dry-run            # what would go
+agentcli prune --older-than 14      # remove finished runs that ended over 14 days ago
+```
+
+- A run is removed only when it is finished, ended more than N days ago
+  (default 30, or `AGENTCLI_RETENTION_DAYS`), is not the active turn of a
+  conversation, and nothing holds its lock.
+- Conversations keep working after their old runs are pruned: `send` still
+  resumes them. A pruned run id reads as not found (exit 4).
+- The plugin runs `agentcli prune --auto` at session start, at most once a day
+  and for at most 3 seconds. `AGENTCLI_NO_PRUNE=1` turns it off.
+- `status` reads a small per-session index, so its cost does not grow with the
+  number of runs on disk.
 
 ## Exit codes
 

@@ -66,6 +66,9 @@ func printRun(ctx *Context, st *store.Store, state store.State, asJSON bool) int
 	if err := st.ReadRequest(runID, &req); err != nil && !errors.Is(err, os.ErrNotExist) {
 		ctx.Warnf("could not read the request of run %s: %v", runID, err)
 	}
+	if !st.RunExists(runID) {
+		return ctx.Fail(ExitNotFound, "no run %q", runID)
+	}
 	v := viewOf(state, req)
 	if asJSON {
 		return printJSON(ctx, v)
@@ -104,14 +107,20 @@ func listRuns(ctx *Context, st *store.Store, sessionID string, asJSON bool) int 
 }
 
 // sessionRuns returns the most recent runs dispatched under the session id,
-// newest first. A run still being admitted (no state file yet) is not listed.
+// newest first. It reads the session's index and opens only the runs it lists,
+// stopping once a listing is full, so its cost does not depend on how many
+// runs other sessions have. Ids whose run is gone are skipped; a session with
+// no index has no runs.
 func sessionRuns(ctx *Context, st *store.Store, sessionID string) ([]runView, error) {
-	ids, err := st.RunIDs()
+	ids, err := st.SessionRunIDs(sessionID)
 	if err != nil {
 		return nil, err
 	}
 	views := []runView{}
 	for _, id := range ids {
+		if len(views) == statusLimit {
+			break
+		}
 		state, err := observeRun(ctx, st, id)
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
@@ -124,9 +133,7 @@ func sessionRuns(ctx *Context, st *store.Store, sessionID string) ([]runView, er
 			ctx.Warnf("skipping run %s: %v", id, err)
 			continue
 		}
-		if req.SessionID == sessionID {
-			views = append(views, viewOf(state, req))
-		}
+		views = append(views, viewOf(state, req))
 	}
 	sort.Slice(views, func(i, j int) bool {
 		if views[i].AdmittedAt != views[j].AdmittedAt {
@@ -134,8 +141,5 @@ func sessionRuns(ctx *Context, st *store.Store, sessionID string) ([]runView, er
 		}
 		return views[i].RunID > views[j].RunID
 	})
-	if len(views) > statusLimit {
-		views = views[:statusLimit]
-	}
 	return views, nil
 }

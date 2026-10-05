@@ -63,6 +63,9 @@ func runTurn(ctx *Context, t turn) int {
 	if err != nil {
 		return failAdmission(ctx, err, runID, conversationID, t.existing != nil)
 	}
+	if err := t.st.IndexRun(p.sessionID, runID); err != nil {
+		ctx.Warnf("could not add run %s to the session index: %v", runID, err)
+	}
 	job := buildJob(ctx, t.st, t.prov, adm.request(), state, t.prompt)
 	if p.background {
 		return launchJob(ctx, job)
