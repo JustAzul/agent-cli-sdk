@@ -29,8 +29,8 @@ func (adapter) Capabilities() provider.Capabilities {
 	}
 }
 
-// ReservedFlag reports whether a native passthrough token is one the SDK owns
-// (FR14). The CLI passes each token alone and each token joined by a space to
+// ReservedFlag reports whether a native passthrough token is one the SDK owns.
+// The CLI passes each token alone and each token joined by a space to
 // its successor, so a "-c key=value" pair arrives as one string.
 func (adapter) ReservedFlag(arg string) bool {
 	if value, ok := configOverride(arg); ok {

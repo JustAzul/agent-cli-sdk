@@ -29,7 +29,7 @@ type Job struct {
 	Prompt   []byte
 	Env      []string    // caller environment, inherited by the provider
 	State    store.State // the admitted (queued) state
-	// CleanSentinel and MaterialLabel drive outcome classification (FR28).
+	// CleanSentinel and MaterialLabel drive outcome classification.
 	CleanSentinel string
 	MaterialLabel string
 	Warn          func(string)
@@ -129,8 +129,8 @@ func Run(job Job) (Result, error) {
 	}), nil
 }
 
-// appendTelemetry writes the run's record, last in the FR22 ordering. A
-// failure only warns (FR29).
+// appendTelemetry writes the run's record, the last step of finish. A
+// failure only warns.
 func (j *Job) appendTelemetry(st store.State, label, excerpt string, o outcome) {
 	rec := j.Record
 	rec.V, rec.Kind = telemetry.Version, "run"
@@ -214,7 +214,7 @@ type outcome struct {
 	sessionID    string
 }
 
-// finish classifies the run and writes the terminal state in FR22 order:
+// finish classifies the run and writes the terminal state in this order:
 // output final, state terminal, conversation marker cleared.
 func (j *Job) finish(st store.State, o outcome) Result {
 	_ = os.Chmod(st.OutputPath, 0o600) // the provider wrote it; keep it user-only
@@ -263,7 +263,7 @@ func nullable(s string) *string {
 	return &s
 }
 
-// classify implements FR28 for runs that ended on their own.
+// classify assigns the outcome of a run that ended on its own.
 func classify(exit int, outputPath, sentinel, materialLabel string) string {
 	if exit != 0 {
 		return "error"

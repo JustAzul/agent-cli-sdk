@@ -85,7 +85,7 @@ func TestExecForeground(t *testing.T) {
 	if fake.Stdin != "q" || fake.Cwd != cwd {
 		t.Errorf("fake saw stdin=%q cwd=%q", fake.Stdin, fake.Cwd)
 	}
-	// second-opinion carries its built-in profile (FR38).
+	// second-opinion carries its built-in profile.
 	wantArgv := []string{"codex", "exec", "-C", cwd, "-s", "read-only", "-m", "gpt-6.1-sol",
 		"-c", "model_reasoning_effort=high", "--json", "-o", out, "-"}
 	if !reflect.DeepEqual(fake.Argv[1:], wantArgv[1:]) {

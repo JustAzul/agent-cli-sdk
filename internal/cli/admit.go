@@ -13,7 +13,7 @@ type admission struct {
 	runID          string
 	conversationID string
 	flags          turnFlags
-	effective      profile.Resolved // profile and flags merged (FR38)
+	effective      profile.Resolved // profile and flags merged
 	cwd            string
 	prompt         []byte
 	passthrough    []string

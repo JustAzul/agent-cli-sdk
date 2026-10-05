@@ -207,7 +207,7 @@ func TestUsageErrors(t *testing.T) {
 	}
 }
 
-// The repository itself must stay clean (FR44). Inside the Docker image the
+// The repository itself must stay clean. Inside the Docker image the
 // git metadata of a worktree is not mounted, so fall back to walking the tree.
 func TestRepositoryTreeIsClean(t *testing.T) {
 	root, err := filepath.Abs("../..")

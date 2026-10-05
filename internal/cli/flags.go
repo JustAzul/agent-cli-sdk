@@ -29,7 +29,7 @@ type turnFlags struct {
 }
 
 // attrList collects --attr and --attr-json values; a later duplicate key
-// replaces an earlier one (FR36).
+// replaces an earlier one.
 type attrList struct {
 	values map[string]any
 }

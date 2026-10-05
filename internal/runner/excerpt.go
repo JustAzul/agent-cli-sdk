@@ -11,7 +11,7 @@ const excerptMaxRunes = 200
 
 var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]`)
 
-// errorExcerpt implements FR16: the last error event message, or when none
+// errorExcerpt returns the last error event message, or when none
 // exists and the exit is non-zero the last non-empty stderr line, stripped of
 // ANSI escapes and truncated to 200 characters.
 func errorExcerpt(eventError string, exit int, stderrLine string) string {

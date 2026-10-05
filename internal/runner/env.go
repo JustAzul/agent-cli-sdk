@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// buildEnv starts from the caller's environment (FR12), then applies the
+// buildEnv starts from the caller's environment, then applies the
 // plan's additions and removals.
 func buildEnv(base []string, add map[string]string, remove []string) []string {
 	drop := map[string]bool{}

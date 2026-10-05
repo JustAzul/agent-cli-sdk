@@ -1,5 +1,5 @@
 // Package profile holds the built-in scenario profiles and resolves the
-// effective model, effort and sandbox for a run (FR38).
+// effective model, effort and sandbox for a run.
 package profile
 
 // Source values say where an effective setting came from.
@@ -30,7 +30,7 @@ type Resolved struct {
 // setting is one scenario's defaults; empty fields mean no default.
 type setting struct{ model, effort, sandbox string }
 
-// builtin is the shipped table, keyed by provider then scenario (FR38). A
+// builtin is the shipped table, keyed by provider then scenario. A
 // scenario or provider that is absent has no profile.
 var builtin = map[string]map[string]setting{
 	"codex": {

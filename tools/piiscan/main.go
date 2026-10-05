@@ -1,5 +1,5 @@
 // Command piiscan fails when a tree holds a personal email, a home-directory
-// path or a UUID-shaped id that is not on the fictitious-id allowlist (FR44).
+// path or a UUID-shaped id that is not on the fictitious-id allowlist.
 //
 // Usage: piiscan [--tracked] [--allowlist FILE] [--exclude DIR]... <dir>
 //

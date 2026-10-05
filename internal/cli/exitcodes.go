@@ -1,6 +1,6 @@
 package cli
 
-// SDK exit codes (FR5). Provider exits pass through unchanged; a signal n
+// SDK exit codes. Provider exits pass through unchanged; a signal n
 // that terminates agentcli itself maps to 128+n.
 const (
 	ExitOK              = 0

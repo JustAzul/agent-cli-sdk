@@ -94,7 +94,7 @@ type Usage struct {
 // IsZero reports whether every counter is zero.
 func (u Usage) IsZero() bool { return u == Usage{} }
 
-// NormalizeUsage returns the usage to record for a command (FR15): a review
+// NormalizeUsage returns the usage to record for a command: a review
 // whose usage is all zeros reports nothing, so it records null.
 func NormalizeUsage(command string, u *Usage) *Usage {
 	if command == "review" && u != nil && u.IsZero() {

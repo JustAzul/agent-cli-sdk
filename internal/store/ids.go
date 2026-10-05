@@ -26,7 +26,7 @@ func newID(prefix string, now time.Time) string {
 	return prefix + "-" + now.UTC().Format(idTimeLayout) + "-" + hex.EncodeToString(b[:])
 }
 
-// ValidateRunID checks a caller-supplied run id (FR9).
+// ValidateRunID checks a caller-supplied run id.
 func ValidateRunID(id string) error {
 	if !runIDPattern.MatchString(id) {
 		return fmt.Errorf("run id must match [A-Za-z0-9._-]{1,128}")

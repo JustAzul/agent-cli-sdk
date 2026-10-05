@@ -15,7 +15,7 @@ import (
 // PluginKey identifies this plugin in Claude Code's installed-plugins record.
 // It is joined at run time on purpose: the linker packs string data together,
 // and a literal "name@host" followed by an unrelated dotted string in the
-// binary reads as a personal email to the FR44 scan of the dist artifacts.
+// binary reads as a personal email to the PII scan of the dist artifacts.
 var PluginKey = strings.Join([]string{"agent-cli", "agent-cli-sdk"}, "@")
 
 // ErrNoInstallRecord means Claude Code has no install record for this plugin.

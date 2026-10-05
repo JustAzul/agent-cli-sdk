@@ -1,4 +1,4 @@
-// Package telemetry owns the append-only run records (FR30, FR31).
+// Package telemetry owns the append-only run records.
 package telemetry
 
 import (
@@ -16,7 +16,7 @@ import (
 // Version is the record schema version.
 const Version = 1
 
-// LockWait is how long an append waits for the telemetry lock (FR30).
+// LockWait is how long an append waits for the telemetry lock.
 const LockWait = 5 * time.Second
 
 const (
@@ -28,7 +28,7 @@ const (
 // ErrLockTimeout is returned when the telemetry lock could not be taken in time.
 var ErrLockTimeout = errors.New("telemetry lock not acquired in time")
 
-// Record is the FR31 run record. Field order is the on-disk order.
+// Record is a run record. Field order is the on-disk order.
 type Record struct {
 	V                 int             `json:"v"`
 	Kind              string          `json:"kind"`
@@ -70,7 +70,7 @@ type Options struct {
 // Append writes rec to the month file of at's UTC month under home. It holds
 // an exclusive lock on telemetry/.lock for the write, waits for it at most
 // LockWait, and emits the record, preceded by a newline when the file does not
-// already end in one, with a single write call (FR30).
+// already end in one, with a single write call.
 func Append(home string, rec Record, at time.Time, opt Options) error {
 	if rec.Attrs == nil {
 		rec.Attrs = map[string]any{}

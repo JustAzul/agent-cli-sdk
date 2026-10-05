@@ -11,7 +11,7 @@ import (
 const versionTimeout = 5 * time.Second
 
 // providerVersion runs the provider's version command and returns its first
-// output line, or nil when it fails, prints nothing or takes too long (FR17).
+// output line, or nil when it fails, prints nothing or takes too long.
 func providerVersion(path string, args []string, dir string, env []string) *string {
 	if len(args) == 0 {
 		return nil

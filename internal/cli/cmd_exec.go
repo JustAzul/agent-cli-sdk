@@ -126,7 +126,7 @@ func runExec(ctx *Context, args []string) int {
 	return res.ExitCode
 }
 
-// printRunResult prints the FR5 --json object for a finished run and returns its
+// printRunResult prints the --json object for a finished run and returns its
 // exit code.
 func printRunResult(ctx *Context, res runner.Result) int {
 	s := res.State
