@@ -125,10 +125,54 @@ func TestDistContent(t *testing.T) {
 	if !strings.Contains(fmt.Sprint(hooks), `"${CLAUDE_PLUGIN_ROOT}"/bin/agentcli link --quiet`) {
 		t.Errorf("hooks.json lacks the SessionStart link command: %v", hooks)
 	}
-	for _, f := range []string{"LICENSE", "README.md"} {
+	if m, _ := hooks["modules"].([]any); len(m) != 1 || m[0] != "./register.js" {
+		t.Errorf("hooks.json modules = %v, want [./register.js]", hooks["modules"])
+	}
+	for _, f := range []string{"LICENSE", "README.md", filepath.Join("hooks", "register.js")} {
 		if !exists(filepath.Join(out, f)) {
 			t.Errorf("dist lacks %s", f)
 		}
+	}
+	for _, f := range []string{"tests", filepath.Join(".claude-plugin", "types"), "tsconfig.json"} {
+		if exists(filepath.Join(out, f)) {
+			t.Errorf("dist carries the development path %s", f)
+		}
+	}
+}
+
+// The files Claude Code writes beside a mod it loads from a folder are not part
+// of the shipped plugin, so planting them in the source tree must not change
+// the dist tree.
+func TestDistOmitsGeneratedModFiles(t *testing.T) {
+	repo := t.TempDir()
+	copyTree(t, repo)
+	typesDir := filepath.Join(repo, "plugin", ".claude-plugin", "types", "claude-code")
+	if err := os.MkdirAll(typesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for path, body := range map[string]string{
+		filepath.Join(typesDir, "index.d.ts"):                     "export {}\n",
+		filepath.Join(repo, "plugin", "tsconfig.json"):            "{}\n",
+		filepath.Join(repo, "plugin", "tests", "planted.test.ts"): "export {}\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, r := buildDist(t, repo, fixedEnv...)
+	if r.code != 0 {
+		t.Fatalf("build-dist exit %d\n%s%s", r.code, r.stdout, r.stderr)
+	}
+	for _, f := range []string{"tests", filepath.Join(".claude-plugin", "types"), "tsconfig.json"} {
+		if exists(filepath.Join(out, f)) {
+			t.Errorf("dist carries %s", f)
+		}
+	}
+	if !exists(filepath.Join(out, ".claude-plugin", "plugin.json")) || !exists(filepath.Join(out, "hooks", "register.js")) {
+		t.Error("dist lost the manifest or the mod entry")
 	}
 }
 

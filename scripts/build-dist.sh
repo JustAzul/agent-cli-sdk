@@ -42,6 +42,9 @@ pkg=github.com/JustAzul/agent-cli-sdk/internal/version
 ldflags="-s -w -X $pkg.Version=$version -X $pkg.SourceCommit=$SOURCE_SHA -X $pkg.BuildSeq=$BUILD_SEQ"
 
 cp -R plugin/. "$out/"
+# Mod tests and the type declarations Claude Code generates beside the mod are
+# development files; they are not part of the shipped plugin.
+rm -rf "$out/tests" "$out/.claude-plugin/types" "$out/tsconfig.json"
 cp LICENSE README.md "$out/"
 chmod 755 "$out/bin/agentcli"
 mkdir -p "$out/libexec"

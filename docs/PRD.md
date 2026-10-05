@@ -55,7 +55,7 @@ Cross-model review is a recurring part of the owner's workflow: about 42 dispatc
 ### In Scope
 - The `agentcli` binary: CLI surface, provider interface, Codex adapter, conversations, jobs, run artifacts, telemetry, profiles, launcher.
 - Distribution as a Claude Code plugin from a new public repository: marketplace manifest on the default branch, prebuilt plugin on a CI-built `dist` branch.
-- A thin mod: native tools for Claude, job-completion notices, a job status line, and a `/agent-cli:jobs` command.
+- A thin mod: native tools for Claude, job-completion notices, a job status line, and a `/agent-cli-jobs` command.
 - A provider-agnostic dispatch skill (a rewrite of the current Codex skill) with evals.
 - Migration of every live consumer in the owner's private configuration, import of the legacy telemetry, and removal of the old wrapper and skill.
 - Installation on the owner's machine and end-to-end validation (real per-scenario smokes, a real post-commit hook review).
@@ -267,8 +267,8 @@ Acceptance Criteria:
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | FR46 | The mod registers three tools, all executing the plugin's own `bin/agentcli`. `ask` takes `prompt` (required), `provider`, `scenario`, `model`, `effort`, `sandbox`, `cwd`; it always admits a job and returns `{conversation_id, run_id}`. `send` takes `conversation_id` and `prompt` (required) plus the same optional fields, and always admits a job. `jobs` takes `action` (`list`, `status`, `result`, `cancel`) and `run_id` (required except for `list`). Each call passes `--source mod` and the session id. | P0 |
-| FR47 | Completion notices. **Strategy:** a timer every 15 seconds lists this session's recent jobs (`status --json` with the session id), skipping the tick if the previous one is still running. For each job that is terminal and whose id is not in the mod's persistent "notified" set, it adds the id to the set, shows a toast, and submits a notice: `agent-cli job <run_id> (<scenario>, conversation <conversation_id>) finished: <outcome>`, followed by the output inline if it is at most 8 KiB, otherwise its first 8 KiB plus the output path. The set survives mod reloads and keeps the 500 most recent ids (older ids are pruned; their jobs are older than any session's status window). | P0 |
-| FR48 | A status line shows the count of this session's running jobs while it is non-zero. `/agent-cli:jobs` prints the session's recent jobs immediately, even while Claude is working. | P0 |
+| FR47 | Completion notices. **Strategy:** a timer every 15 seconds lists this session's recent jobs (`status --json` with the session id) and considers those started by the mod (recorded `source` `mod`; a job started from the CLI belongs to its starter), skipping the tick if the previous one is still running. For each job that is terminal and whose id is not in the mod's persistent "notified" set, it adds the id to the set, shows a toast, and submits a notice: `agent-cli job <run_id> (<scenario>, conversation <conversation_id>) finished: <outcome>`, followed by the output inline if it is at most 8 KiB, otherwise its first 8 KiB plus the output path. The set survives mod reloads and keeps the 500 most recent ids (older ids are pruned; their jobs are older than any session's status window). | P0 |
+| FR48 | A status line shows the count of this session's running jobs started by the mod while it is non-zero. `/agent-cli-jobs` prints the session's recent jobs immediately, even while Claude is working; the command is not `/agent-cli:jobs` because a mod command cannot carry the plugin namespace. | P0 |
 | FR49 | Before implementing the mod, confirm the mods API types on the installed Claude Code build. A mismatch with FR46–FR48 is a blocker, reported, not worked around. | P0 |
 
 #### L. Dispatch skill

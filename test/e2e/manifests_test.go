@@ -72,6 +72,16 @@ func TestHooksRunLinkOnSessionStart(t *testing.T) {
 	}
 }
 
+func TestHooksDeclareTheModEntry(t *testing.T) {
+	m := repoJSON(t, "plugin/hooks/hooks.json")
+	if got, want := m["modules"], []any{"./register.js"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("modules = %v, want %v", got, want)
+	}
+	if !exists(filepath.Join(repoRoot, "plugin", "hooks", "register.js")) {
+		t.Error("plugin/hooks/register.js is missing")
+	}
+}
+
 func TestShimIsExecutableShellScript(t *testing.T) {
 	p := filepath.Join(repoRoot, "plugin", "bin", "agentcli")
 	st, err := os.Stat(p)

@@ -2,3 +2,5 @@
 /dist/
 *.test
 *.out
+plugin/.claude-plugin/types/
+plugin/tsconfig.json

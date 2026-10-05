@@ -51,7 +51,7 @@ Unless stated otherwise:
   - Within one poll interval after the job ends, a toast appears and a turn is submitted whose text starts `agent-cli job <run_id>` and contains the outcome and the output inline (≤ 8 KiB).
 - [ ] **mod send (FR46):** `send {conversation_id, prompt}` → a job for turn 2, with a notice on completion.
 - [ ] **mod jobs (FR46):** `jobs {action: "list"}`, `{action: "status", run_id}`, `{action: "result", run_id}`, `{action: "cancel", run_id}` each return the CLI's JSON or content.
-- [ ] **mod status line and command (FR48):** two running jobs → the status line shows 2. `/agent-cli:jobs` prints the session's recent jobs while Claude is mid-turn.
+- [ ] **mod status line and command (FR48):** two running jobs → the status line shows 2. `/agent-cli-jobs` prints the session's recent jobs while Claude is mid-turn.
 - [ ] **provider version (FR17):** fake `codex --version` prints `codex-cli 9.9.9` → the record's `provider_version` is `codex-cli 9.9.9`. A fake whose version flag exits 1 → `provider_version: null`, and the run is otherwise unaffected.
 - [ ] **terminal ordering (FR22):** a test observer polls a job; at the first poll where `state.json` is terminal, `output.md` already has its final bytes and the conversation's marker is already cleared. The telemetry record appears after the terminal state, never before.
 - [ ] **job survives its launcher (FR25):** start a job from a shell, then kill that shell's whole process group → the job still reaches `done`, and `wait` from a new shell exits 0.
