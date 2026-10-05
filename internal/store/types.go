@@ -15,10 +15,14 @@ type State struct {
 	ProviderStartTime *string `json:"provider_start_time"`
 	ExitCode          *int    `json:"exit_code"`
 	Outcome           *string `json:"outcome"`
-	ErrorExcerpt      *string `json:"error_excerpt"`
-	UnparsedEvents    int     `json:"unparsed_events"`
-	OutputPath        string  `json:"output_path"`
-	RunDir            string  `json:"run_dir"`
+	// ProviderExit and SDKStatus are written at every terminal transition. A
+	// state without SDKStatus predates them: readers derive both then.
+	ProviderExit   *int    `json:"provider_exit"`
+	SDKStatus      *string `json:"sdk_status"`
+	ErrorExcerpt   *string `json:"error_excerpt"`
+	UnparsedEvents int     `json:"unparsed_events"`
+	OutputPath     string  `json:"output_path"`
+	RunDir         string  `json:"run_dir"`
 }
 
 // Defaults are the first-turn settings a conversation keeps.
@@ -40,4 +44,13 @@ type Conversation struct {
 	ActiveRunID       *string  `json:"active_run_id"`
 	CreatedAt         string   `json:"created_at"`
 	UpdatedAt         string   `json:"updated_at"`
+}
+
+// IsTerminal reports whether a run in this state will not change again.
+func IsTerminal(state string) bool {
+	switch state {
+	case "done", "failed", "cancelled", "timeout", "lost":
+		return true
+	}
+	return false
 }

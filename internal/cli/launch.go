@@ -34,7 +34,7 @@ type worker struct {
 	done chan struct{} // closed once the process has been reaped
 }
 
-func startWorker(ctx *Context, runID string) (*worker, error) {
+func startWorker(ctx *Context, st *store.Store, runID string) (*worker, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -42,7 +42,14 @@ func startWorker(ctx *Context, runID string) (*worker, error) {
 	cmd := exec.Command(exe, workerCommand, runID)
 	cmd.Env = ctx.Env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // its own session: the caller's terminal and group never reach it
-	// Stdin, stdout and stderr stay nil, which connects them to the null device.
+	// Stdin and stdout stay nil, which connects them to the null device. The
+	// worker's stderr is its log in the run directory.
+	if log, err := st.OpenWorkerLog(runID); err != nil {
+		ctx.Warnf("could not open the worker log of run %s: %v", runID, err)
+	} else {
+		defer log.Close()
+		cmd.Stderr = log
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
@@ -62,7 +69,7 @@ func (w *worker) kill() {
 // does not get going.
 func launchJob(ctx *Context, job runner.Job) int {
 	runID := job.State.RunID
-	w, err := startWorker(ctx, runID)
+	w, err := startWorker(ctx, job.Store, runID)
 	if err != nil {
 		return abortJob(ctx, job, nil, fmt.Sprintf("starting the worker: %v", err))
 	}
@@ -103,9 +110,10 @@ func awaitRunning(s *store.Store, runID string, wait time.Duration, workerDone <
 	}
 }
 
-// abortJob fails an admission whose worker never reached running. Holding the
+// abortJob ends an admission whose worker never reached running. Holding the
 // run lock first guarantees the worker cannot start the provider while it is
-// being ended; the run then turns failed.
+// being ended; the run then turns failed, or cancelled when a cancel request
+// is what stopped the worker.
 func abortJob(ctx *Context, job runner.Job, w *worker, reason string) int {
 	st := job.Store
 	lock, err := st.LockRun(job.State.RunID)
@@ -121,6 +129,9 @@ func abortJob(ctx *Context, job runner.Job, w *worker, reason string) int {
 	if w != nil {
 		job.State.WorkerPID = w.cmd.Process.Pid
 		w.kill()
+	}
+	if st.CancelRequested(job.State.RunID) {
+		return reportAdmission(ctx, runner.CancelQueued(job).State)
 	}
 	runner.Abort(job, reason)
 	return ctx.Fail(ExitInternal, "job %s failed to start: %s", job.State.RunID, reason)

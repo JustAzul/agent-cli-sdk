@@ -117,12 +117,19 @@ Atomic writes are a temp file in the same directory plus rename.
   "provider_start_time": "opaque string or null",
   "exit_code": null,
   "outcome": null,
+  "provider_exit": null,
+  "sdk_status": null,
   "error_excerpt": null,
   "unparsed_events": 0,
   "output_path": "absolute path",
   "run_dir": "absolute path"
 }
 ```
+
+`provider_exit` (int or null) and `sdk_status` (string) are null until the run
+is terminal and are written at every terminal transition: finish, abort, lost
+and cancel-while-queued. Readers print what is recorded; they derive both from
+`state` and `exit_code` only for a state file that has no `sdk_status`.
 
 `runs/<run_id>/request.json`: the resolved request (command, provider,
 scenario, model, effort, sandbox and their `_source`s, cwd, source, session id,
@@ -147,6 +154,10 @@ timeout, clean sentinel, material label, attrs, passthrough) plus the plan.
 `status` (`busy`/`idle`) and `resumable` are derived on read, not stored.
 
 A cancel request is the presence of `runs/<run_id>/cancel.request`.
+
+`runs/<run_id>/worker.log` is the stderr of a job's worker (0600), bounded to
+its last 64 KiB like `stderr.tail`; runner warnings raised inside a job land
+there.
 
 Lock files: `runs/<run_id>/lock`, `conversations/<conversation_id>.lock`,
 `telemetry/.lock`, and the launcher's lock next to the launcher. All use
@@ -228,8 +239,28 @@ Telemetry records: exactly the FR31 fields for `run`, and
   prints `{"conversations": [...]}`; a run object's `exit_code` is the run's
   recorded exit. `status` lists newest first by `admitted_at`, then run id.
 - Test seams for jobs: `AGENTCLI_TEST_ADMISSION_WAIT_MS` (admission wait,
-  default 10 seconds) and `AGENTCLI_TEST_WORKER_STALL_MS` (the worker sleeps
-  before taking the run lock).
+  default 10 seconds), `AGENTCLI_TEST_WORKER_STALL_MS` (the worker sleeps
+  before taking the run lock) and `AGENTCLI_TEST_QUEUED_GRACE_MS` (how long a
+  queued run may go without a lock holder before readers count it lost,
+  default 30 seconds).
+- Lost: every reader of a non-terminal run (`status`, `wait`, `cancel`,
+  `result`, `send`) probes the run lock without blocking. A free lock with the
+  state `running`, or with `queued` for longer than the grace, settles the
+  run under the run lock itself, after re-reading the state, so racing readers
+  settle it once; a reader that finds the lock held leaves the run alone. The
+  provider group is killed only when its leader still has the recorded start
+  time. The settled run is `lost`, exit 125, `sdk_status` `lost`,
+  `provider_exit` null, and finishes in the usual order.
+- Cancel: `agentcli cancel <run_id> [--json]` writes `cancel.request`, then a
+  queued run no worker holds is marked `cancelled` (exit 130) by `cancel`
+  itself, and a running run gets SIGTERM sent to its recorded worker pid. A
+  queued run whose lock a worker holds is awaited until it is running (bounded
+  by the admission wait). `cancel` exits 0 whichever way the request lands,
+  4 for an unknown id, and prints the run like `status`; on a terminal run it
+  writes nothing. A worker re-reads the state once it holds the run lock: a
+  terminal state, or a cancel request on a queued run, ends the worker without
+  spawning the provider and without touching the state. An admission whose
+  worker left for that reason ends the run `cancelled`, not `failed`.
 
 ## Rules for every slice
 
@@ -240,5 +271,9 @@ Telemetry records: exactly the FR31 fields for `run`, and
   never invoke a real `codex` binary.
 - Code comments state the behaviour or invariant. They never cite requirement
   or test-case ids (`FR…`); those belong in commit messages.
+- Never stop, kill or remove a container, process or file you did not create.
+  Every `make` container carries the label `agentcli.dev=1`; a hung test is
+  stopped with `docker ps -q --filter label=agentcli.dev=1 | xargs -r docker kill`,
+  never with a host-wide `docker ps -q`.
 - A choice that would change a documented contract (CLI, exit codes, persisted
   formats, telemetry fields) is not made inside a slice: report it back.

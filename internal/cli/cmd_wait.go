@@ -83,7 +83,7 @@ func awaitTerminal(ctx *Context, st *store.Store, state store.State, timeout tim
 			return state, ctx.Fail(ExitWaitTimeout, "run %s is still %s after %s", state.RunID, state.State, timeout)
 		case <-tick.C:
 		}
-		next, err := observeRun(st, state.RunID)
+		next, err := observeRun(ctx, st, state.RunID)
 		if err != nil {
 			return state, ctx.Fail(ExitInternal, "reading run %s: %v", state.RunID, err)
 		}

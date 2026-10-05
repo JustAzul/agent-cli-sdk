@@ -74,7 +74,7 @@ func runSend(ctx *Context, args []string) int {
 	}
 
 	// Re-read so the checks below see the conversation as it is now.
-	if conv, err = st.ReadConversation(conv.ConversationID); err != nil {
+	if conv, err = readConversationReconciled(ctx, st, conv.ConversationID); err != nil {
 		return ctx.Fail(ExitInternal, "reading the conversation: %v", err)
 	}
 	if conv.ActiveRunID != nil {

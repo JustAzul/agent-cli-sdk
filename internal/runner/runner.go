@@ -106,6 +106,9 @@ func Run(job Job) (Result, error) {
 		return Result{}, fmt.Errorf("taking the run lock: %w", err)
 	}
 	defer lock.Close()
+	if settled, done, err := j.alreadySettled(st.RunID); done || err != nil {
+		return settled, err
+	}
 
 	// Termination requests that arrive before the provider exists wait here.
 	sigs := make(chan os.Signal, 2)
@@ -188,23 +191,49 @@ func Run(job Job) (Result, error) {
 	return j.finish(st, j.outcomeOf(end, stream, tail.Bytes())), nil
 }
 
+// ErrCancelPending is returned by Run when a cancel request is waiting for a
+// run that has not started: the provider is not spawned and the state is left
+// as it was, for whoever wrote the request to settle.
+var ErrCancelPending = errors.New("a cancel request is waiting for the run")
+
+// alreadySettled is the check a run makes once it holds the lock, against the
+// state as it is now rather than as admitted: another process may have settled
+// the run (cancelled it, or found it lost) while it waited. A run settled that
+// way is returned as recorded and left untouched; a queued run with a cancel
+// request is not started.
+func (j *Job) alreadySettled(runID string) (Result, bool, error) {
+	cur, err := j.Store.ReadState(runID)
+	switch {
+	case err != nil:
+		return Result{}, false, fmt.Errorf("reading the run's state: %w", err)
+	case store.IsTerminal(cur.State):
+		return resultOf(cur), true, nil
+	case cur.State != "queued":
+		return Result{}, false, fmt.Errorf("the run is %s, not queued", cur.State)
+	case j.Store.CancelRequested(runID):
+		return Result{}, false, ErrCancelPending
+	}
+	return Result{}, false, nil
+}
+
+// resultOf describes a run that was already terminal as recorded.
+func resultOf(st store.State) Result {
+	res := Result{State: st, ProviderExit: st.ProviderExit, ExitCode: exitInternal}
+	if st.ExitCode != nil {
+		res.ExitCode = *st.ExitCode
+	}
+	if st.SDKStatus != nil {
+		res.SDKStatus = *st.SDKStatus
+	}
+	return res
+}
+
 // Abort finalizes a run that was admitted but whose worker never started it:
 // the state turns failed (exit 70, outcome error) with the excerpt, the
 // conversation's marker is cleared and the telemetry record is appended, in
 // the order a finished run uses. The record's timestamp is the admission.
 func Abort(job Job, excerpt string) Result {
-	j := &job
-	if j.Warn == nil {
-		j.Warn = func(string) {}
-	}
-	if j.Now == nil {
-		j.Now = time.Now
-	}
-	j.startedAt = j.Now()
-	if admitted, err := time.Parse(time.RFC3339, j.State.AdmittedAt); err == nil {
-		j.startedAt = admitted
-	}
-	return j.finish(j.State, outcome{state: "failed", exitCode: exitInternal, label: "error", excerpt: excerpt, sdkStatus: SDKStatusInternalError})
+	return settleUnfinished(job, outcome{state: "failed", exitCode: exitInternal, label: "error", excerpt: excerpt, sdkStatus: SDKStatusInternalError})
 }
 
 // outcomeOf turns how the provider ended into the run's outcome.
@@ -501,6 +530,9 @@ func (j *Job) finish(st store.State, o outcome) Result {
 	st.EndedAt = &ended
 	st.ExitCode = &exit
 	st.Outcome = &label
+	st.ProviderExit = o.providerExit
+	sdk := o.sdkStatus
+	st.SDKStatus = &sdk
 	st.ErrorExcerpt = nullable(excerpt)
 	if err := j.Store.WriteState(st.RunID, st); err != nil {
 		j.Warn(fmt.Sprintf("could not write the terminal state: %v", err))

@@ -56,6 +56,12 @@ func showRun(ctx *Context, st *store.Store, runID string, asJSON bool) int {
 	if code != 0 {
 		return code
 	}
+	return printRun(ctx, st, state, asJSON)
+}
+
+// printRun prints one run as status shows it.
+func printRun(ctx *Context, st *store.Store, state store.State, asJSON bool) int {
+	runID := state.RunID
 	var req requestRecord
 	if err := st.ReadRequest(runID, &req); err != nil && !errors.Is(err, os.ErrNotExist) {
 		ctx.Warnf("could not read the request of run %s: %v", runID, err)
@@ -106,7 +112,7 @@ func sessionRuns(ctx *Context, st *store.Store, sessionID string) ([]runView, er
 	}
 	views := []runView{}
 	for _, id := range ids {
-		state, err := observeRun(st, id)
+		state, err := observeRun(ctx, st, id)
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
 				ctx.Warnf("skipping run %s: %v", id, err)

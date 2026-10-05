@@ -8,21 +8,7 @@ import (
 )
 
 // isTerminalState reports whether a run in this state will not change again.
-func isTerminalState(state string) bool {
-	switch state {
-	case "done", "failed", "cancelled", "timeout", "lost":
-		return true
-	}
-	return false
-}
-
-// observeRun is how every reader sees a run: its recorded state. This is the
-// one place where a non-terminal run whose lock is free would be reconciled
-// as lost before the state is returned; today the state is reported as it was
-// recorded.
-func observeRun(st *store.Store, runID string) (store.State, error) {
-	return st.ReadState(runID)
-}
+func isTerminalState(state string) bool { return store.IsTerminal(state) }
 
 // loadRun resolves a run id to its observed state. An id that names no run
 // (including one that is not a valid run id) exits 4. The ids that exist are
@@ -32,7 +18,7 @@ func loadRun(ctx *Context, st *store.Store, runID string) (store.State, int) {
 		return store.State{}, ctx.Fail(ExitNotFound, "no run %q", runID)
 	}
 	ctx.IDs["run_id"] = runID
-	state, err := observeRun(st, runID)
+	state, err := observeRun(ctx, st, runID)
 	if errors.Is(err, os.ErrNotExist) {
 		delete(ctx.IDs, "run_id")
 		return store.State{}, ctx.Fail(ExitNotFound, "no run %q", runID)
@@ -44,11 +30,14 @@ func loadRun(ctx *Context, st *store.Store, runID string) (store.State, int) {
 	return state, 0
 }
 
-// sdkStatusOfRun derives the sdk_status of a finished run from its recorded
-// state; the state file keeps no separate field for it. A run still in
-// progress has none. A provider that itself exits 127 or 70 reads as the SDK
-// code of the same number.
+// sdkStatusOfRun is the sdk_status of a finished run: the recorded one, or for
+// a state written before it was recorded, derived from the state. A run still
+// in progress has none. A provider that itself exits 127 or 70 reads as the
+// SDK code of the same number.
 func sdkStatusOfRun(s store.State) *string {
+	if s.SDKStatus != nil {
+		return s.SDKStatus
+	}
 	var v string
 	switch s.State {
 	case "done":
@@ -75,10 +64,13 @@ func failedSDKStatus(exit *int) string {
 	return "ok"
 }
 
-// providerExitOfRun is the provider's own exit status when the state records
-// one: runs that ended on their own. A timed out, cancelled, lost or
-// never-started run has none recorded.
+// providerExitOfRun is the provider's own exit status: the recorded one, or
+// for a state written before it was recorded, the exit of a run that ended on
+// its own. A timed out, cancelled, lost or never-started run has none then.
 func providerExitOfRun(s store.State) *int {
+	if s.SDKStatus != nil {
+		return s.ProviderExit
+	}
 	switch sdk := sdkStatusOfRun(s); {
 	case sdk == nil || *sdk != "ok":
 		return nil

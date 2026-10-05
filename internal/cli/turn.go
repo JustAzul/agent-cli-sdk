@@ -69,6 +69,9 @@ func runTurn(ctx *Context, t turn) int {
 	}
 
 	res, err := runner.Run(job)
+	if errors.Is(err, runner.ErrCancelPending) {
+		return ctx.Fail(ExitCancelled, "run %s was cancelled before it started", runID)
+	}
 	if err != nil {
 		return ctx.Fail(ExitInternal, "%v", err)
 	}

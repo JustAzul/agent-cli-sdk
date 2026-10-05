@@ -242,6 +242,7 @@ func TestResultPrintsALargeOutputFully(t *testing.T) {
 func TestResultOfARunStillInProgressIsRefused(t *testing.T) {
 	s := newSandbox(t)
 	seedRunFiles(t, s, "res-live", map[string]any{"state": "running", "ended_at": nil, "exit_code": nil, "outcome": nil}, nil, []byte("partial"))
+	holdLock(t, filepath.Join(s.home, "runs", "res-live", "lock")) // a worker is alive: the run is in progress, not lost
 	r := s.run("result", "res-live")
 	if r.code != 3 || r.stdout != "" || !strings.Contains(r.stderr, "res-live") {
 		t.Errorf("exit %d stdout %q stderr %q, want 3, nothing printed and the run named", r.code, r.stdout, r.stderr)
@@ -306,7 +307,7 @@ func TestReadersRefuseUnknownIDsWithExit4(t *testing.T) {
 	s := newSandbox(t)
 	seedRunFiles(t, s, "known", nil, nil, []byte("x"))
 	for _, id := range []string{"nope", "../known", "r-20260101T000000Z-deadbeef"} {
-		for _, cmd := range []string{"status", "wait", "result"} {
+		for _, cmd := range []string{"status", "wait", "result", "cancel"} {
 			if r := s.run(cmd, id); r.code != 4 {
 				t.Errorf("%s %s: exit %d, want 4 (stderr %q)", cmd, id, r.code, r.stderr)
 			}

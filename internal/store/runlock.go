@@ -82,6 +82,11 @@ func (s *Store) CancelRequestPath(runID string) string {
 	return filepath.Join(s.RunDir(runID), "cancel.request")
 }
 
+// WriteCancelRequest records, durably, a request to cancel the run.
+func (s *Store) WriteCancelRequest(runID string, at time.Time) error {
+	return writeFileAtomic(s.CancelRequestPath(runID), []byte(at.UTC().Format(time.RFC3339)+"\n"))
+}
+
 // CancelRequested reports whether a cancel request exists for the run.
 func (s *Store) CancelRequested(runID string) bool {
 	_, err := os.Lstat(s.CancelRequestPath(runID))

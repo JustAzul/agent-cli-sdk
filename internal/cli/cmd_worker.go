@@ -31,6 +31,10 @@ func runWorker(ctx *Context, args []string) int {
 		return ctx.Fail(ExitInternal, "%v", err)
 	}
 	st := store.Open(home)
+	if log, err := st.OpenWorkerLog(runID); err == nil {
+		defer log.Close()
+		ctx.Stderr = store.NewTailWriter(log, store.WorkerLogLimit) // what the worker says stays within the log's bound
+	}
 	state, err := st.ReadState(runID)
 	if errors.Is(err, os.ErrNotExist) {
 		return ctx.Fail(ExitNotFound, "no run %q", runID)
@@ -54,10 +58,13 @@ func runWorker(ctx *Context, args []string) int {
 	if d, ok := envMillis(ctx.Getenv, "AGENTCLI_TEST_WORKER_STALL_MS"); ok {
 		time.Sleep(d) // lets a test hold the run between queued and running
 	}
-	if state.State != "queued" {
-		return ExitOK // the run was settled before this worker got to it
-	}
-	if _, err := runner.Run(buildJob(ctx, st, prov, req, state, prompt)); err != nil {
+	// The runner re-reads the state once it holds the run lock: a run settled
+	// while this worker waited is left as it is.
+	_, err = runner.Run(buildJob(ctx, st, prov, req, state, prompt))
+	switch {
+	case errors.Is(err, runner.ErrCancelPending):
+		return ExitOK // whoever asked for the cancel settles the run
+	case err != nil:
 		return ctx.Fail(ExitInternal, "%v", err)
 	}
 	return ExitOK
