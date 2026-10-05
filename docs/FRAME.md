@@ -238,6 +238,12 @@ Telemetry records: exactly the FR31 fields for `run`, and
   `wait`. `status --json` prints `{"runs": [...]}`, `conversations --json`
   prints `{"conversations": [...]}`; a run object's `exit_code` is the run's
   recorded exit. `status` lists newest first by `admitted_at`, then run id.
+- `wait` returns after finalization: the run is terminal and its run lock is
+  released, so the conversation marker and the telemetry record are written.
+  It waits at most 10 seconds past the terminal state for the lock; if it is
+  still held it prints one warning on stderr and returns anyway (seam:
+  `AGENTCLI_TEST_FINALIZE_WAIT_MS`). `--timeout` covers the whole wait and
+  exits 5 when it passes during finalization.
 - Test seams for jobs: `AGENTCLI_TEST_ADMISSION_WAIT_MS` (admission wait,
   default 10 seconds), `AGENTCLI_TEST_WORKER_STALL_MS` (the worker sleeps
   before taking the run lock) and `AGENTCLI_TEST_QUEUED_GRACE_MS` (how long a

@@ -12,7 +12,9 @@ import (
 )
 
 // cleanupJob kills what a test's job leaves behind: a worker that is still
-// running and the provider group its state recorded.
+// running and the provider group its state recorded. It then waits for the run
+// lock to be free, so a worker that was finishing has stopped writing before
+// the sandbox's directory is removed.
 func cleanupJob(t *testing.T, s *sandbox, runID string) {
 	t.Helper()
 	t.Cleanup(func() {
@@ -27,6 +29,13 @@ func cleanupJob(t *testing.T, s *sandbox, runID string) {
 			}
 		}
 		killRecordedGroup(s.home, runID)
+		lock := filepath.Join(s.home, "runs", runID, "lock")
+		for deadline := time.Now().Add(10 * time.Second); lockHeld(t, lock); time.Sleep(10 * time.Millisecond) {
+			if !time.Now().Before(deadline) {
+				t.Errorf("run %s: the run lock is still held after cleanup", runID)
+				return
+			}
+		}
 	})
 }
 
@@ -292,4 +301,90 @@ func TestJobTerminalOrdering(t *testing.T) {
 	releaseTel()
 	untilTrue(t, "the telemetry record", func() bool { return len(telFiles()) == 1 })
 	checkFields(t, "record", oneRecord(t, s.home), map[string]any{"run_id": "jord1", "outcome": "ok", "background": true})
+}
+
+// wait returns once the run is finalized, not merely terminal: the telemetry
+// record is the last thing the worker writes, so it is there when wait returns
+// even though the state turned terminal well before.
+func TestWaitReturnsAfterTheRunIsFinalized(t *testing.T) {
+	s := newSandbox(t).set("FAKECODEX_OUTPUT", "final").set("FAKECODEX_SLEEP_MS", "800")
+	admitJob(t, s, "wfin1", "q")
+	releaseTel := holdLock(t, filepath.Join(s.home, "telemetry", ".lock"))
+	telFiles := func() []string { m, _ := filepath.Glob(filepath.Join(s.home, "telemetry", "*.jsonl")); return m }
+
+	type waited struct {
+		r        result
+		telAtEnd int
+	}
+	done := make(chan waited, 1)
+	go func() {
+		r := s.run("wait", "wfin1")
+		done <- waited{r, len(telFiles())}
+	}()
+	waitForState(t, s, "wfin1", "a terminal state", isTerminal)
+	time.Sleep(400 * time.Millisecond) // the append is held behind the telemetry lock
+	releaseTel()
+
+	w := <-done
+	if w.r.code != 0 {
+		t.Fatalf("wait: exit %d, stderr %s", w.r.code, w.r.stderr)
+	}
+	if w.telAtEnd != 1 {
+		t.Errorf("telemetry files when wait returned = %d, want the run's record already written", w.telAtEnd)
+	}
+	if held := lockHeld(t, filepath.Join(s.home, "runs", "wfin1", "lock")); held {
+		t.Error("the run lock is still held when wait returned")
+	}
+}
+
+// A finalization that does not finish does not hold wait for ever: past the
+// bound wait prints one warning and returns the run it saw.
+func TestWaitGivesUpOnFinalizationAfterTheBound(t *testing.T) {
+	s := newSandbox(t).set("FAKECODEX_OUTPUT", "final").set("FAKECODEX_SLEEP_MS", "500").
+		set("AGENTCLI_TEST_FINALIZE_WAIT_MS", "600")
+	admitJob(t, s, "wfin2", "q")
+	holdLock(t, filepath.Join(s.home, "telemetry", ".lock"))
+
+	start := time.Now()
+	w := s.run("wait", "wfin2")
+	elapsed := time.Since(start)
+	if w.code != 0 {
+		t.Fatalf("wait: exit %d, stderr %s", w.code, w.stderr)
+	}
+	if got := warningLines(w.stderr); len(got) != 1 || !strings.Contains(got[0], "wfin2") {
+		t.Errorf("warnings = %q, want one line naming the run", got)
+	}
+	if elapsed > 4*time.Second {
+		t.Errorf("wait took %v, want it to give up shortly after the bound", elapsed)
+	}
+	if w.lastLine() != filepath.Join(s.home, "runs", "wfin2", "output.md") {
+		t.Errorf("wait last line = %q, want the output path", w.lastLine())
+	}
+}
+
+// --timeout covers the whole wait, finalization included.
+func TestWaitTimeoutCoversFinalization(t *testing.T) {
+	s := newSandbox(t).set("FAKECODEX_OUTPUT", "final").set("FAKECODEX_SLEEP_MS", "300")
+	admitJob(t, s, "wfin3", "q")
+	holdLock(t, filepath.Join(s.home, "telemetry", ".lock"))
+
+	w := s.run("wait", "wfin3", "--timeout", "2")
+	if w.code != 5 {
+		t.Errorf("wait: exit %d, want 5 (stderr %s)", w.code, w.stderr)
+	}
+}
+
+// lockHeld reports whether another process holds the flock on path.
+func lockHeld(t *testing.T, path string) bool {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	err = syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB)
+	return errors.Is(err, syscall.EWOULDBLOCK)
 }
