@@ -172,6 +172,25 @@ Telemetry records: exactly the FR31 fields for `run`, and
 - Fixtures in `testdata/codex/` are recorded Codex streams with fictitious ids.
   Never put real ids, emails or home paths in the repository.
 
+## Output contract details
+
+- `sdk_status` takes one value per SDK outcome, mirroring the exit codes:
+  `ok` (the SDK did its part; the provider's own exit may still be non-zero),
+  `usage_error`, `busy`, `not_found`, `not_resumable`, `wait_timeout`,
+  `internal_error`, `timeout`, `lost`, `provider_missing`, `cancelled`.
+  `provider_exit` is null when the provider never ran.
+- With `--json`, every exit path prints exactly one JSON object on stdout,
+  usage errors included: `{"sdk_status": "...", "exit_code": N, "error": "..."}`
+  plus whatever ids exist at that point.
+- `--dry-run` prints `{command, provider, run_id, argv, stdin, cwd, env_add,
+  env_remove}`; `stdin` is `prompt` or `empty`, and `argv` names the real
+  future output path.
+- `--skip-git-repo-check` sits after `-o <path>` and before passthrough flags.
+  A work tree is detected by walking up from the cwd for a `.git` entry.
+- An error event sets `error_excerpt` even when the provider exits 0.
+- Flags may be interspersed with the positional prompt; everything after the
+  first literal `--` is passthrough.
+
 ## Rules for every slice
 
 - Test-first: one failing test, minimal code to pass it, refactor on green.
