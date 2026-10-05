@@ -4,6 +4,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/JustAzul/agent-cli-sdk/internal/profile"
 	"github.com/JustAzul/agent-cli-sdk/internal/provider"
 	"github.com/JustAzul/agent-cli-sdk/internal/store"
 )
@@ -12,6 +13,7 @@ type admission struct {
 	runID          string
 	conversationID string
 	flags          turnFlags
+	effective      profile.Resolved // profile and flags merged (FR38)
 	cwd            string
 	prompt         []byte
 	passthrough    []string
@@ -50,19 +52,19 @@ func admit(st *store.Store, a admission) error {
 	if err := st.WritePrompt(a.runID, a.prompt); err != nil {
 		return err
 	}
-	f := a.flags
+	f, e := a.flags, a.effective
 	passthrough := a.passthrough
 	if passthrough == nil {
 		passthrough = []string{}
 	}
 	req := requestRecord{
 		Command: "exec", Provider: f.provider, Scenario: f.scenario,
-		Model: nullable(f.model), ModelSource: source(f.model),
-		Effort: nullable(f.effort), EffortSource: source(f.effort),
-		Sandbox: nullable(f.sandbox), SandboxSource: source(f.sandbox),
+		Model: nullable(e.Model), ModelSource: e.ModelSource,
+		Effort: nullable(e.Effort), EffortSource: e.EffortSource,
+		Sandbox: nullable(e.Sandbox), SandboxSource: e.SandboxSource,
 		Cwd: a.cwd, Source: f.source, SessionID: f.sessionID,
 		CleanSentinel: f.cleanSentinel, MaterialLabel: f.materialLabel,
-		Attrs: map[string]any{}, Passthrough: passthrough, Plan: a.plan,
+		Attrs: f.attrs.object(), Passthrough: passthrough, Plan: a.plan,
 	}
 	if err := st.WriteRequest(a.runID, req); err != nil {
 		return err
@@ -78,7 +80,7 @@ func admit(st *store.Store, a admission) error {
 	}
 	return st.CreateConversation(store.Conversation{
 		ConversationID: a.conversationID, Provider: f.provider, Cwd: a.cwd,
-		Defaults:    store.Defaults{Scenario: f.scenario, Model: f.model, Effort: f.effort, Sandbox: f.sandbox},
+		Defaults:    store.Defaults{Scenario: f.scenario, Model: e.Model, Effort: e.Effort, Sandbox: e.Sandbox},
 		Turns:       []string{a.runID},
 		ActiveRunID: &a.runID,
 		CreatedAt:   ts, UpdatedAt: ts,
@@ -90,11 +92,4 @@ func nullable(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-func source(flagValue string) string {
-	if flagValue != "" {
-		return "flag"
-	}
-	return "provider-default"
 }

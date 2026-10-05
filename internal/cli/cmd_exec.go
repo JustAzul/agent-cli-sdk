@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/JustAzul/agent-cli-sdk/internal/profile"
 	"github.com/JustAzul/agent-cli-sdk/internal/provider"
 	"github.com/JustAzul/agent-cli-sdk/internal/runner"
 	"github.com/JustAzul/agent-cli-sdk/internal/store"
+	"github.com/JustAzul/agent-cli-sdk/internal/telemetry"
 )
 
 func init() {
@@ -25,22 +27,18 @@ func runExec(ctx *Context, args []string) int {
 
 	prov, ok := provider.Get(p.provider)
 	if !ok {
-		ctx.Errorf("unknown provider %q (known: %v)", p.provider, provider.Names())
-		return ExitUsage
+		return ctx.Fail(ExitUsage, "unknown provider %q (known: %v)", p.provider, provider.Names())
 	}
-	caps := prov.Capabilities()
-	if !caps.Supports("exec") {
-		ctx.Errorf("provider %q does not support the exec command", p.provider)
-		return ExitUsage
+	eff := profile.Resolve(p.provider, p.scenario, profile.Flags{Model: p.model, Effort: p.effort, Sandbox: p.sandbox})
+	if err := prov.Capabilities().Unsupported(provider.Needs{Command: "exec", Sandbox: eff.Sandbox}); err != nil {
+		return ctx.Fail(ExitUsage, "provider %q %v", p.provider, err)
 	}
-	if p.sandbox != "" && !caps.SupportsSandbox(p.sandbox) {
-		ctx.Errorf("unsupported --sandbox %q for provider %q (supported: %v)", p.sandbox, p.provider, caps.Sandboxes)
-		return ExitUsage
+	if flagText, reserved := reservedPassthrough(prov, p.passthrough); reserved {
+		return ctx.Fail(ExitUsage, "native flag %q is reserved by agentcli and cannot be passed after --", flagText)
 	}
 
 	if len(p.positional)+boolToInt(p.promptFile != "") != 1 {
-		ctx.Errorf("exactly one prompt source is required: a positional prompt, - for stdin, or --prompt-file")
-		return ExitUsage
+		return ctx.Fail(ExitUsage, "exactly one prompt source is required: a positional prompt, - for stdin, or --prompt-file")
 	}
 	prompt, code := readPrompt(ctx, p)
 	if code != 0 {
@@ -54,8 +52,7 @@ func runExec(ctx *Context, args []string) int {
 
 	home, err := store.ResolveHome(ctx.Getenv)
 	if err != nil {
-		ctx.Errorf("%v", err)
-		return ExitInternal
+		return ctx.Fail(ExitInternal, "%v", err)
 	}
 	st := store.Open(home)
 	now := ctx.Now().UTC()
@@ -68,16 +65,15 @@ func runExec(ctx *Context, args []string) int {
 	req := provider.Request{
 		Command:     "exec",
 		Cwd:         cwd,
-		Model:       p.model,
-		Effort:      p.effort,
-		Sandbox:     p.sandbox,
+		Model:       eff.Model,
+		Effort:      eff.Effort,
+		Sandbox:     eff.Sandbox,
 		Passthrough: p.passthrough,
 		OutputPath:  outputPath,
 	}
 	plan, err := prov.BuildPlan(req)
 	if err != nil {
-		ctx.Errorf("building the provider plan: %v", err)
-		return ExitInternal
+		return ctx.Fail(ExitInternal, "building the provider plan: %v", err)
 	}
 
 	if p.dryRun {
@@ -90,31 +86,37 @@ func runExec(ctx *Context, args []string) int {
 	}
 
 	conversationID := store.NewConversationID(now)
+	ctx.IDs["run_id"], ctx.IDs["conversation_id"] = runID, conversationID
 	if err := admit(st, admission{
-		runID: runID, conversationID: conversationID, flags: p.turnFlags,
+		runID: runID, conversationID: conversationID, flags: p.turnFlags, effective: eff,
 		cwd: cwd, prompt: prompt, passthrough: p.passthrough, plan: plan, now: now,
 	}); err != nil {
 		if errors.Is(err, store.ErrRunExists) {
-			ctx.Errorf("run id %q already exists", runID)
-			return ExitUsage
+			delete(ctx.IDs, "run_id")
+			delete(ctx.IDs, "conversation_id")
+			return ctx.Fail(ExitUsage, "run id %q already exists", runID)
 		}
-		ctx.Errorf("admitting the run: %v", err)
-		return ExitInternal
+		return ctx.Fail(ExitInternal, "admitting the run: %v", err)
 	}
 
 	state, err := st.ReadState(runID)
 	if err != nil {
-		ctx.Errorf("reading the admitted state: %v", err)
-		return ExitInternal
+		return ctx.Fail(ExitInternal, "reading the admitted state: %v", err)
 	}
 	res, err := runner.Run(runner.Job{
 		Store: st, Provider: prov, Plan: plan, Prompt: prompt, Env: ctx.Env, State: state,
 		CleanSentinel: p.cleanSentinel, MaterialLabel: p.materialLabel,
 		Warn: func(msg string) { ctx.Warnf("%s", msg) }, Now: ctx.Now,
+		Record: telemetry.Record{
+			Provider: p.provider, Command: "exec", Scenario: p.scenario,
+			Model: nullable(eff.Model), ModelSource: eff.ModelSource,
+			Effort: nullable(eff.Effort), EffortSource: eff.EffortSource,
+			Sandbox: nullable(eff.Sandbox), Source: p.source, SessionID: p.sessionID,
+			Cwd: cwd, Attrs: p.attrs.object(),
+		},
 	})
 	if err != nil {
-		ctx.Errorf("%v", err)
-		return ExitInternal
+		return ctx.Fail(ExitInternal, "%v", err)
 	}
 
 	if p.json {
@@ -169,8 +171,7 @@ func readPrompt(ctx *Context, p parsedTurn) ([]byte, int) {
 	case p.promptFile != "":
 		data, err := os.ReadFile(p.promptFile)
 		if err != nil {
-			ctx.Errorf("reading --prompt-file: %v", err)
-			return nil, ExitUsage
+			return nil, ctx.Fail(ExitUsage, "reading --prompt-file: %v", err)
 		}
 		return data, 0
 	case p.positional[0] == "-":
@@ -179,8 +180,7 @@ func readPrompt(ctx *Context, p parsedTurn) ([]byte, int) {
 		}
 		data, err := io.ReadAll(ctx.Stdin)
 		if err != nil {
-			ctx.Errorf("reading the prompt from standard input: %v", err)
-			return nil, ExitUsage
+			return nil, ctx.Fail(ExitUsage, "reading the prompt from standard input: %v", err)
 		}
 		return data, 0
 	default:
@@ -195,20 +195,17 @@ func resolveCwd(ctx *Context, flagValue string, dryRun bool) (string, int) {
 	if cwd == "" {
 		wd, err := os.Getwd()
 		if err != nil {
-			ctx.Errorf("cannot determine the working directory: %v", err)
-			return "", ExitInternal
+			return "", ctx.Fail(ExitInternal, "cannot determine the working directory: %v", err)
 		}
 		cwd = wd
 	}
 	abs, err := filepath.Abs(cwd)
 	if err != nil {
-		ctx.Errorf("--cwd: %v", err)
-		return "", ExitUsage
+		return "", ctx.Fail(ExitUsage, "--cwd: %v", err)
 	}
 	if !dryRun {
 		if info, err := os.Stat(abs); err != nil || !info.IsDir() {
-			ctx.Errorf("--cwd %q is not an existing directory", abs)
-			return "", ExitUsage
+			return "", ctx.Fail(ExitUsage, "--cwd %q is not an existing directory", abs)
 		}
 	}
 	return abs, 0
@@ -218,12 +215,10 @@ func resolveCwd(ctx *Context, flagValue string, dryRun bool) (string, int) {
 func chooseRunID(ctx *Context, st *store.Store, supplied string, now time.Time) (string, int) {
 	if supplied != "" {
 		if err := store.ValidateRunID(supplied); err != nil {
-			ctx.Errorf("invalid --run-id: %v", err)
-			return "", ExitUsage
+			return "", ctx.Fail(ExitUsage, "invalid --run-id: %v", err)
 		}
 		if st.RunExists(supplied) {
-			ctx.Errorf("run id %q already exists", supplied)
-			return "", ExitUsage
+			return "", ctx.Fail(ExitUsage, "run id %q already exists", supplied)
 		}
 		return supplied, 0
 	}
@@ -233,6 +228,22 @@ func chooseRunID(ctx *Context, st *store.Store, supplied string, now time.Time) 
 			return id, 0
 		}
 	}
-	ctx.Errorf("could not generate a unique run id")
-	return "", ExitInternal
+	return "", ctx.Fail(ExitInternal, "could not generate a unique run id")
+}
+
+// reservedPassthrough returns the first native token the provider reserves.
+// Each token is checked alone and joined to its successor, so option/value
+// pairs such as "-c model=x" are seen as one string.
+func reservedPassthrough(prov provider.Provider, args []string) (string, bool) {
+	for i, a := range args {
+		if prov.ReservedFlag(a) {
+			return a, true
+		}
+		if i+1 < len(args) {
+			if pair := a + " " + args[i+1]; prov.ReservedFlag(pair) {
+				return pair, true
+			}
+		}
+	}
+	return "", false
 }

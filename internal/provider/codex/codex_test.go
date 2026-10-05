@@ -118,3 +118,58 @@ func TestParseEvent(t *testing.T) {
 		}
 	}
 }
+
+func TestReservedFlag(t *testing.T) {
+	p := codex.New()
+	reserved := []string{
+		"-o", "--output-last-message", "--output-last-message=x", "--json", "-C", "--cd", "--cd=/x", "-C/x",
+		"-m", "--model", "--model=m", "-s", "--sandbox", "--sandbox=read-only", "-s=read-only",
+		"--dangerously-bypass-approvals-and-sandbox", "--dangerously-anything", "--yolo",
+		"--approve-for-me", "--ephemeral",
+		"-c model=x", "-c model_reasoning_effort=low", "-c sandbox_permissions=[]", "-c sandbox_mode=x",
+		"--config model=x", "--config=model=x", "-cmodel=x", "-c=model=x", "-c model = x",
+	}
+	for _, a := range reserved {
+		if !p.ReservedFlag(a) {
+			t.Errorf("%q should be reserved", a)
+		}
+	}
+	allowed := []string{
+		"-c features.web_search=true", "-c", "features.web_search=true", "--add-dir", "/tmp/x",
+		"--add-dir /tmp/x", "-c model_providers.x.name=y", "-c models=1", "-i", "--skip-git-repo-check",
+	}
+	for _, a := range allowed {
+		if p.ReservedFlag(a) {
+			t.Errorf("%q should be allowed", a)
+		}
+	}
+}
+
+func TestReviewUsageZeroBecomesNull(t *testing.T) {
+	data, err := os.ReadFile("../../../testdata/codex/review-ok.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usage *provider.Usage
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if ev, ok := codex.New().ParseEvent([]byte(line)); ok && ev.Usage != nil {
+			usage = ev.Usage
+		}
+	}
+	if usage == nil || !usage.IsZero() {
+		t.Fatalf("fixture usage = %+v, want an all-zero usage object", usage)
+	}
+	if got := provider.NormalizeUsage("review", usage); got != nil {
+		t.Errorf("review with zero usage = %+v, want nil", got)
+	}
+	if got := provider.NormalizeUsage("exec", usage); got == nil || !got.IsZero() {
+		t.Errorf("exec keeps its zero usage object, got %+v", got)
+	}
+	real := &provider.Usage{OutputTokens: 7}
+	if got := provider.NormalizeUsage("review", real); got != real {
+		t.Errorf("review with real usage = %+v", got)
+	}
+	if got := provider.NormalizeUsage("review", nil); got != nil {
+		t.Errorf("nil stays nil, got %+v", got)
+	}
+}

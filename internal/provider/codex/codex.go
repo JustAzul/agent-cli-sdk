@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/JustAzul/agent-cli-sdk/internal/provider"
 )
@@ -28,8 +29,64 @@ func (adapter) Capabilities() provider.Capabilities {
 	}
 }
 
-// ReservedFlag is filled in by the reserved-flag slice.
-func (adapter) ReservedFlag(arg string) bool { return false }
+// ReservedFlag reports whether a native passthrough token is one the SDK owns
+// (FR14). The CLI passes each token alone and each token joined by a space to
+// its successor, so a "-c key=value" pair arrives as one string.
+func (adapter) ReservedFlag(arg string) bool {
+	if value, ok := configOverride(arg); ok {
+		return reservedConfigKey(value)
+	}
+	name := arg
+	if strings.HasPrefix(arg, "--") {
+		name, _, _ = strings.Cut(arg, "=")
+	}
+	switch name {
+	case "-o", "--output-last-message", "--json", "-C", "--cd", "-m", "--model",
+		"-s", "--sandbox", "--approve-for-me", "--ephemeral", "--yolo":
+		return true
+	}
+	if strings.HasPrefix(name, "--dangerously-") {
+		return true
+	}
+	// Short flags with an attached value: -mfoo, -s=read-only, -C/x, -ofile.
+	if !strings.HasPrefix(arg, "--") && len(arg) > 2 {
+		switch arg[:2] {
+		case "-o", "-C", "-m", "-s":
+			return true
+		}
+	}
+	return false
+}
+
+// configOverride extracts the "key=value" of a -c / --config override written
+// as "-c k=v", "-ck=v", "-c=k=v", "--config k=v" or "--config=k=v". A bare
+// "-c" or "--config" carries no value and is not an override on its own.
+func configOverride(arg string) (string, bool) {
+	rest := ""
+	switch {
+	case strings.HasPrefix(arg, "--config"):
+		rest = strings.TrimPrefix(arg, "--config")
+		if rest == "" || (rest[0] != '=' && rest[0] != ' ') {
+			return "", false
+		}
+	case strings.HasPrefix(arg, "-c") && !strings.HasPrefix(arg, "--"):
+		rest = strings.TrimPrefix(arg, "-c")
+		if rest == "" {
+			return "", false
+		}
+	default:
+		return "", false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(rest, "=")), true
+}
+
+// reservedConfigKey is true for the config keys the SDK controls through its
+// own flags: model, model_reasoning_effort and any sandbox* key.
+func reservedConfigKey(override string) bool {
+	key, _, _ := strings.Cut(override, "=")
+	key = strings.TrimSpace(key)
+	return key == "model" || key == "model_reasoning_effort" || strings.HasPrefix(key, "sandbox")
+}
 
 func (adapter) VersionArgs() []string { return []string{"--version"} }
 

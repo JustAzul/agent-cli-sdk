@@ -63,12 +63,31 @@ func TestExecForeground(t *testing.T) {
 	if req["scenario"] != "second-opinion" || req["source"] != "cli" || req["provider"] != "codex" {
 		t.Errorf("request.json = %v", req)
 	}
+	if req["model"] != "gpt-6.1-sol" || req["model_source"] != "profile" {
+		t.Errorf("request.json model = %v (%v)", req["model"], req["model_source"])
+	}
+
+	rec0 := oneRecord(t, s.home)
+	usage, _ := rec0["usage"].(map[string]any)
+	for k, want := range map[string]any{
+		"command": "exec", "turn": float64(1), "outcome": "ok", "model": "gpt-6.1-sol",
+		"model_source": "profile", "provider_session_id": execOKThread, "conversation_id": convID,
+	} {
+		if rec0[k] != want {
+			t.Errorf("telemetry %s = %v, want %v", k, rec0[k], want)
+		}
+	}
+	if usage["output_tokens"] != float64(5) {
+		t.Errorf("telemetry usage = %v", rec0["usage"])
+	}
 
 	fake := readRecord(t, rec)
 	if fake.Stdin != "q" || fake.Cwd != cwd {
 		t.Errorf("fake saw stdin=%q cwd=%q", fake.Stdin, fake.Cwd)
 	}
-	wantArgv := []string{"codex", "exec", "-C", cwd, "--json", "-o", out, "-"}
+	// second-opinion carries its built-in profile (FR38).
+	wantArgv := []string{"codex", "exec", "-C", cwd, "-s", "read-only", "-m", "gpt-6.1-sol",
+		"-c", "model_reasoning_effort=high", "--json", "-o", out, "-"}
 	if !reflect.DeepEqual(fake.Argv[1:], wantArgv[1:]) {
 		t.Errorf("fake argv = %v, want %v", fake.Argv[1:], wantArgv[1:])
 	}

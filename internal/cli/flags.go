@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"strings"
 )
 
 // turnFlags are the flags shared by commands that run a provider turn.
@@ -22,6 +25,63 @@ type turnFlags struct {
 	materialLabel string
 	json          bool
 	dryRun        bool
+	attrs         attrList
+}
+
+// attrList collects --attr and --attr-json values; a later duplicate key
+// replaces an earlier one (FR36).
+type attrList struct {
+	values map[string]any
+}
+
+func (l *attrList) set(key string, value any) {
+	if l.values == nil {
+		l.values = map[string]any{}
+	}
+	l.values[key] = value
+}
+
+// object returns the attrs as a JSON object; never nil.
+func (l attrList) object() map[string]any {
+	out := make(map[string]any, len(l.values))
+	for k, v := range l.values {
+		out[k] = v
+	}
+	return out
+}
+
+// attrFlag is a repeatable flag.Value feeding an attrList.
+type attrFlag struct {
+	list   *attrList
+	asJSON bool
+}
+
+func (f attrFlag) String() string { return "" }
+
+func (f attrFlag) Set(raw string) error {
+	name := "--attr"
+	if f.asJSON {
+		name = "--attr-json"
+	}
+	key, value, ok := strings.Cut(raw, "=")
+	if !ok || key == "" {
+		return fmt.Errorf("%s needs key=value with a non-empty key, got %q", name, raw)
+	}
+	if !f.asJSON {
+		f.list.set(key, value)
+		return nil
+	}
+	dec := json.NewDecoder(strings.NewReader(value))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return fmt.Errorf("%s %q: the value is not valid JSON: %v", name, key, err)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return fmt.Errorf("%s %q: the value holds more than one JSON value", name, key)
+	}
+	f.list.set(key, v)
+	return nil
 }
 
 // parsedTurn is the result of parsing a turn command's arguments.
@@ -61,16 +121,22 @@ func parseTurnArgs(ctx *Context, name string, args []string) (p parsedTurn, exit
 	fs.StringVar(&f.cleanSentinel, "clean-sentinel", "", "output text that classifies the run as clean")
 	fs.StringVar(&f.materialLabel, "material-label", "ok", "outcome label for material output")
 	fs.BoolVar(&f.json, "json", false, "print one JSON object instead of the output path")
+	fs.Var(attrFlag{list: &f.attrs}, "attr", "attribute key=value (repeatable)")
+	fs.Var(attrFlag{list: &f.attrs, asJSON: true}, "attr-json", "attribute key=<json> (repeatable)")
 	fs.BoolVar(&f.dryRun, "dry-run", false, "print the provider plan and execute nothing")
 
 	rest := head
 	for {
 		if err := fs.Parse(rest); err != nil {
+			ctx.JSON = wantsJSON(head)
 			if errors.Is(err, flag.ErrHelp) {
+				ctx.emitErrorJSON(ExitOK, "help requested")
 				return p, ExitOK, true
 			}
+			ctx.emitErrorJSON(ExitUsage, err.Error())
 			return p, ExitUsage, true
 		}
+		ctx.JSON = p.json
 		if fs.NArg() == 0 {
 			return p, 0, false
 		}

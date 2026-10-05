@@ -16,6 +16,7 @@ import (
 
 	"github.com/JustAzul/agent-cli-sdk/internal/provider"
 	"github.com/JustAzul/agent-cli-sdk/internal/store"
+	"github.com/JustAzul/agent-cli-sdk/internal/telemetry"
 )
 
 const stderrTailBytes = 64 * 1024
@@ -33,6 +34,13 @@ type Job struct {
 	MaterialLabel string
 	Warn          func(string)
 	Now           func() time.Time
+
+	// Record carries the telemetry fields known before the run starts; the
+	// runner fills in the rest and appends it when the run is terminal.
+	Record telemetry.Record
+
+	startedAt time.Time
+	version   *string
 }
 
 // Result describes a finished run.
@@ -62,7 +70,8 @@ func Run(job Job) (Result, error) {
 	}
 
 	st := j.State
-	started := j.stamp()
+	j.startedAt = j.Now()
+	started := j.startedAt.UTC().Format(time.RFC3339)
 	st.State = "running"
 	st.StartedAt = &started
 	st.WorkerPID = os.Getpid()
@@ -80,6 +89,7 @@ func Run(job Job) (Result, error) {
 	cmd := exec.Command(path, j.Plan.Argv[1:]...)
 	cmd.Dir = j.Plan.Dir
 	cmd.Env = buildEnv(j.Env, j.Plan.EnvAdd, j.Plan.EnvRemove)
+	env := cmd.Env
 	switch j.Plan.Stdin {
 	case provider.StdinPrompt:
 		cmd.Stdin = bytes.NewReader(j.Prompt)
@@ -97,8 +107,13 @@ func Run(job Job) (Result, error) {
 		return j.finish(st, outcome{state: "failed", exitCode: 127, label: "error", excerpt: excerpt, sdkStatus: SDKStatusProviderMissing}), nil
 	}
 
+	// The version probe runs beside the provider so it adds no wall time.
+	versionCh := make(chan *string, 1)
+	go func() { versionCh <- providerVersion(path, j.Provider.VersionArgs(), j.Plan.Dir, env) }()
+
 	stream := j.consume(stdout, st)
 	waitErr := cmd.Wait()
+	j.version = <-versionCh
 	exit, err := exitCode(waitErr)
 	if err != nil {
 		return Result{}, fmt.Errorf("waiting for the provider: %w", err)
@@ -109,9 +124,31 @@ func Run(job Job) (Result, error) {
 	}
 	st.UnparsedEvents = stream.unparsed
 	return j.finish(st, outcome{
-		exitCode: exit, providerExit: &exit, sdkStatus: SDKStatusOK, usage: stream.usage,
+		exitCode: exit, providerExit: &exit, sdkStatus: SDKStatusOK, usage: stream.usage, sessionID: stream.sessionID,
 		eventError: stream.lastError, stderrLine: lastNonEmptyLine(tail.Bytes()),
 	}), nil
+}
+
+// appendTelemetry writes the run's record, last in the FR22 ordering. A
+// failure only warns (FR29).
+func (j *Job) appendTelemetry(st store.State, label, excerpt string, o outcome) {
+	rec := j.Record
+	rec.V, rec.Kind = telemetry.Version, "run"
+	rec.RunID, rec.ConversationID, rec.Turn = st.RunID, st.ConversationID, st.Turn
+	rec.TS = j.startedAt.UTC().Format(time.RFC3339)
+	rec.ProviderVersion = j.version
+	rec.ExitCode, rec.Outcome = o.exitCode, label
+	rec.DurationMS = j.Now().Sub(j.startedAt).Milliseconds()
+	rec.OutputFile = st.OutputPath
+	if info, err := os.Stat(st.OutputPath); err == nil {
+		rec.OutputBytes = info.Size()
+	}
+	rec.ErrorExcerpt = nullable(excerpt)
+	rec.Usage = provider.NormalizeUsage(rec.Command, o.usage)
+	rec.ProviderSessionID = nullable(o.sessionID)
+	if err := telemetry.Append(j.Store.Home, rec, j.Now(), telemetry.Options{}); err != nil {
+		j.Warn(fmt.Sprintf("could not append the telemetry record: %v", err))
+	}
 }
 
 func (j *Job) stamp() string { return j.Now().UTC().Format(time.RFC3339) }
@@ -120,13 +157,13 @@ type streamResult struct {
 	unparsed  int
 	lastError string
 	usage     *provider.Usage
+	sessionID string
 }
 
 // consume parses provider stdout line by line as it arrives and persists the
 // provider session id as soon as it is seen.
 func (j *Job) consume(r io.Reader, st store.State) streamResult {
 	var res streamResult
-	sessionID := ""
 	br := bufio.NewReader(r)
 	for {
 		line, err := br.ReadBytes('\n')
@@ -136,9 +173,9 @@ func (j *Job) consume(r io.Reader, st store.State) streamResult {
 			case !ok:
 				res.unparsed++
 			default:
-				if ev.SessionID != "" && ev.SessionID != sessionID {
-					sessionID = ev.SessionID
-					j.persistSession(st.ConversationID, sessionID)
+				if ev.SessionID != "" && ev.SessionID != res.sessionID {
+					res.sessionID = ev.SessionID
+					j.persistSession(st.ConversationID, res.sessionID)
 				}
 				if ev.Usage != nil {
 					res.usage = ev.Usage
@@ -174,6 +211,7 @@ type outcome struct {
 	usage        *provider.Usage
 	eventError   string
 	stderrLine   string
+	sessionID    string
 }
 
 // finish classifies the run and writes the terminal state in FR22 order:
@@ -214,6 +252,7 @@ func (j *Job) finish(st store.State, o outcome) Result {
 	if err != nil {
 		j.Warn(fmt.Sprintf("could not clear the conversation's active run: %v", err))
 	}
+	j.appendTelemetry(st, label, excerpt, o)
 	return Result{State: st, ProviderExit: o.providerExit, ExitCode: exit, SDKStatus: o.sdkStatus, Usage: o.usage}
 }
 

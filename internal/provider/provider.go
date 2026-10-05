@@ -22,6 +22,28 @@ func (c Capabilities) Supports(command string) bool { return contains(c.Commands
 // SupportsSandbox reports whether the provider supports the sandbox mode.
 func (c Capabilities) SupportsSandbox(mode string) bool { return contains(c.Sandboxes, mode) }
 
+// Needs is what one request requires of a provider.
+type Needs struct {
+	Command      string // "exec", "review" or "resume"
+	Sandbox      string // empty when no sandbox mode is requested
+	ReviewTarget string // empty when no review target is requested
+}
+
+// Unsupported returns an error naming the first capability the request needs
+// that the provider does not declare, or nil.
+func (c Capabilities) Unsupported(n Needs) error {
+	if n.Command != "" && !c.Supports(n.Command) {
+		return fmt.Errorf("does not support the %s command (supported: %v)", n.Command, c.Commands)
+	}
+	if n.Sandbox != "" && !c.SupportsSandbox(n.Sandbox) {
+		return fmt.Errorf("does not support sandbox mode %q (supported: %v)", n.Sandbox, c.Sandboxes)
+	}
+	if n.ReviewTarget != "" && !contains(c.ReviewTargets, n.ReviewTarget) {
+		return fmt.Errorf("does not support review target %q (supported: %v)", n.ReviewTarget, c.ReviewTargets)
+	}
+	return nil
+}
+
 func contains(list []string, v string) bool {
 	for _, s := range list {
 		if s == v {
@@ -67,6 +89,18 @@ type Usage struct {
 	CacheWriteInputTokens int64 `json:"cache_write_input_tokens"`
 	OutputTokens          int64 `json:"output_tokens"`
 	ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
+}
+
+// IsZero reports whether every counter is zero.
+func (u Usage) IsZero() bool { return u == Usage{} }
+
+// NormalizeUsage returns the usage to record for a command (FR15): a review
+// whose usage is all zeros reports nothing, so it records null.
+func NormalizeUsage(command string, u *Usage) *Usage {
+	if command == "review" && u != nil && u.IsZero() {
+		return nil
+	}
+	return u
 }
 
 // Event is what one provider output line reveals.
