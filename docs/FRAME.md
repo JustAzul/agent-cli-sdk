@@ -190,6 +190,15 @@ Telemetry records: exactly the FR31 fields for `run`, and
 - An error event sets `error_excerpt` even when the provider exits 0.
 - Flags may be interspersed with the positional prompt; everything after the
   first literal `--` is passthrough.
+- `ReservedFlag` is called with each passthrough token alone and with each
+  token joined to its successor by one space, so `-c model=x` arrives whole.
+- A conversation's `defaults` hold the resolved model, effort and sandbox
+  (profile applied), so later turns reuse them unless a flag overrides.
+- In a run record an absent value is `null`, never an empty string
+  (`session_id`, `provider_session_id`, `model`, …). `output_bytes` is `0` when
+  the output file is missing. `ts` is the run's start at second resolution.
+- The provider version probe runs beside the provider, is bounded at 5 seconds
+  and keeps the first non-empty stdout line.
 
 ## Rules for every slice
 
@@ -198,5 +207,7 @@ Telemetry records: exactly the FR31 fields for `run`, and
 - Run `make test` (or a narrowed `TESTFLAGS`) and paste the output in the report.
 - No git commits, no pushes, no network access other than module downloads, and
   never invoke a real `codex` binary.
+- Code comments state the behaviour or invariant. They never cite requirement
+  or test-case ids (`FR…`); those belong in commit messages.
 - A choice that would change a documented contract (CLI, exit codes, persisted
   formats, telemetry fields) is not made inside a slice: report it back.
