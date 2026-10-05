@@ -22,7 +22,11 @@ var (
 	repoRoot    string
 )
 
-func TestMain(m *testing.M) { os.Exit(realMain(m)) }
+func TestMain(m *testing.M) {
+	code := realMain(m)
+	cleanupVariants()
+	os.Exit(code)
+}
 
 func realMain(m *testing.M) int {
 	root, err := findRepoRoot()

@@ -1,0 +1,20 @@
+{
+  "name": "agent-cli-sdk",
+  "owner": {
+    "name": "JustAzul"
+  },
+  "metadata": {
+    "description": "Marketplace for agentcli, a provider-agnostic CLI for driving agent CLIs from Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "agent-cli",
+      "description": "agentcli: drive agent CLIs (Codex today) from Claude Code, hooks and scripts.",
+      "source": {
+        "source": "github",
+        "repo": "JustAzul/agent-cli-sdk",
+        "ref": "dist"
+      }
+    }
+  ]
+}

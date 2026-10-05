@@ -13,7 +13,7 @@ DOCKER_GO = docker run --rm -u $$(id -u):$$(id -g) \
   -e GOFLAGS=-buildvcs=false -e CGO_ENABLED=0 \
   $(GO_IMAGE)
 
-.PHONY: test vet fmt build cache
+.PHONY: test vet fmt build cache dist
 
 cache:
 	mkdir -p $(CACHE_DIR)/mod $(CACHE_DIR)/build
@@ -29,3 +29,9 @@ fmt: cache
 
 build: cache
 	$(DOCKER_GO) go build -trimpath -ldflags '$(LDFLAGS)' -o build/agentcli ./cmd/agentcli
+
+# Same tree CI publishes to the dist branch, built inside the pinned container.
+# git metadata is not visible in the container, so the host passes it in.
+dist: cache
+	rm -rf dist
+	$(DOCKER_GO) env SOURCE_SHA=$(SOURCE_SHA) BUILD_SEQ=$(BUILD_SEQ) sh scripts/build-dist.sh dist
