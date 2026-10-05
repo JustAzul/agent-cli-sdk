@@ -6,7 +6,7 @@ SOURCE_SHA := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 BUILD_SEQ  := $(shell git rev-list --count HEAD 2>/dev/null || echo 0)
 LDFLAGS    := -s -w -X github.com/JustAzul/agent-cli-sdk/internal/version.Version=$(VERSION) -X github.com/JustAzul/agent-cli-sdk/internal/version.SourceCommit=$(SOURCE_SHA) -X github.com/JustAzul/agent-cli-sdk/internal/version.BuildSeq=$(BUILD_SEQ)
 
-DOCKER_GO = docker run --rm -u $$(id -u):$$(id -g) \
+DOCKER_GO = docker run --rm --label agentcli.dev=1 -u $$(id -u):$$(id -g) \
   -v $(CURDIR):/src -w /src \
   -v $(CACHE_DIR)/mod:/gomod -v $(CACHE_DIR)/build:/gocache \
   -e GOMODCACHE=/gomod -e GOCACHE=/gocache -e HOME=/tmp \
