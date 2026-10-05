@@ -222,6 +222,14 @@ Telemetry records: exactly the FR31 fields for `run`, and
   (for example 143 or 137); `sdk_status` is `timeout` or `cancelled`
   (`cancelled` for both 130 and 128+n). `--timeout` takes a positive integer
   of seconds.
+- Jobs: the worker is the hidden `agentcli _worker <run_id>`, started with
+  `setsid` and null stdio. `result` on a non-terminal run exits 3 and names
+  `wait`. `status --json` prints `{"runs": [...]}`, `conversations --json`
+  prints `{"conversations": [...]}`; a run object's `exit_code` is the run's
+  recorded exit. `status` lists newest first by `admitted_at`, then run id.
+- Test seams for jobs: `AGENTCLI_TEST_ADMISSION_WAIT_MS` (admission wait,
+  default 10 seconds) and `AGENTCLI_TEST_WORKER_STALL_MS` (the worker sleeps
+  before taking the run lock).
 
 ## Rules for every slice
 

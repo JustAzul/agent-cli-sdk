@@ -20,6 +20,7 @@ type admission struct {
 	prompt         []byte
 	passthrough    []string
 	plan           provider.Plan
+	background     bool // the run is a job executed by a detached worker
 	now            time.Time
 }
 
@@ -77,19 +78,14 @@ func reserve(st *store.Store, a admission) (int, error) {
 	return 1, err
 }
 
-func writeRun(st *store.Store, a admission, turn int) (store.State, error) {
-	if err := st.CreateRunDir(a.runID); err != nil {
-		return store.State{}, err
-	}
-	if err := st.WritePrompt(a.runID, a.prompt); err != nil {
-		return store.State{}, err
-	}
+// request is the resolved request the run's request.json holds.
+func (a admission) request() requestRecord {
 	f, e := a.flags, a.effective
 	passthrough := a.passthrough
 	if passthrough == nil {
 		passthrough = []string{}
 	}
-	req := requestRecord{
+	return requestRecord{
 		Command: a.command, Provider: f.provider, Scenario: f.scenario,
 		Model: nullable(e.Model), ModelSource: e.ModelSource,
 		Effort: nullable(e.Effort), EffortSource: e.EffortSource,
@@ -98,11 +94,20 @@ func writeRun(st *store.Store, a admission, turn int) (store.State, error) {
 		CleanSentinel: f.cleanSentinel, MaterialLabel: f.materialLabel,
 		Attrs: f.attrs.object(), Passthrough: passthrough, Plan: a.plan,
 	}
-	if err := st.WriteRequest(a.runID, req); err != nil {
+}
+
+func writeRun(st *store.Store, a admission, turn int) (store.State, error) {
+	if err := st.CreateRunDir(a.runID); err != nil {
+		return store.State{}, err
+	}
+	if err := st.WritePrompt(a.runID, a.prompt); err != nil {
+		return store.State{}, err
+	}
+	if err := st.WriteRequest(a.runID, a.request()); err != nil {
 		return store.State{}, err
 	}
 	state := store.State{
-		RunID: a.runID, ConversationID: a.conversationID, Turn: turn, State: "queued",
+		RunID: a.runID, ConversationID: a.conversationID, Turn: turn, State: "queued", Background: a.background,
 		AdmittedAt: a.now.Format(time.RFC3339), WorkerPID: os.Getpid(),
 		OutputPath: st.OutputPath(a.runID), RunDir: st.RunDir(a.runID),
 	}

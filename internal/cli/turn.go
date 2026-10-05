@@ -3,13 +3,11 @@ package cli
 import (
 	"errors"
 	"io"
-	"time"
 
 	"github.com/JustAzul/agent-cli-sdk/internal/profile"
 	"github.com/JustAzul/agent-cli-sdk/internal/provider"
 	"github.com/JustAzul/agent-cli-sdk/internal/runner"
 	"github.com/JustAzul/agent-cli-sdk/internal/store"
-	"github.com/JustAzul/agent-cli-sdk/internal/telemetry"
 )
 
 // turn is one fully validated provider turn, ready to plan, admit and run.
@@ -56,29 +54,21 @@ func runTurn(ctx *Context, t turn) int {
 		conversationID = store.NewConversationID(now)
 	}
 	ctx.IDs["run_id"], ctx.IDs["conversation_id"] = runID, conversationID
-	state, err := admit(t.st, admission{
+	adm := admission{
 		command: t.command, runID: runID, conversationID: conversationID, existing: t.existing,
 		flags: p.turnFlags, effective: t.eff, cwd: t.cwd, prompt: t.prompt,
-		passthrough: p.passthrough, plan: plan, now: now,
-	})
+		passthrough: p.passthrough, plan: plan, background: p.background, now: now,
+	}
+	state, err := admit(t.st, adm)
 	if err != nil {
 		return failAdmission(ctx, err, runID, conversationID, t.existing != nil)
 	}
+	job := buildJob(ctx, t.st, t.prov, adm.request(), state, t.prompt)
+	if p.background {
+		return launchJob(ctx, job)
+	}
 
-	res, err := runner.Run(runner.Job{
-		Store: t.st, Provider: t.prov, Plan: plan, Prompt: t.prompt, Env: ctx.Env, State: state,
-		CleanSentinel: p.cleanSentinel, MaterialLabel: p.materialLabel,
-		Timeout:  time.Duration(p.timeoutS) * time.Second,
-		Shutdown: runner.ShutdownFromEnv(ctx.Getenv),
-		Warn:     func(msg string) { ctx.Warnf("%s", msg) }, Now: ctx.Now,
-		Record: telemetry.Record{
-			Provider: p.provider, Command: t.command, Scenario: p.scenario,
-			Model: nullable(t.eff.Model), ModelSource: t.eff.ModelSource,
-			Effort: nullable(t.eff.Effort), EffortSource: t.eff.EffortSource,
-			Sandbox: nullable(t.eff.Sandbox), Source: p.source, SessionID: nullable(p.sessionID),
-			TimeoutS: timeoutSeconds(p.timeoutS), Cwd: t.cwd, Attrs: p.attrs.object(),
-		},
-	})
+	res, err := runner.Run(job)
 	if err != nil {
 		return ctx.Fail(ExitInternal, "%v", err)
 	}

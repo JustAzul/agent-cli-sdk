@@ -3,11 +3,13 @@
 package store
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -74,6 +76,11 @@ func (s *Store) WritePrompt(runID string, prompt []byte) error {
 	return s.writeRunFile(runID, "prompt.md", prompt)
 }
 
+// ReadPrompt returns the full prompt stored for the run.
+func (s *Store) ReadPrompt(runID string) ([]byte, error) {
+	return os.ReadFile(filepath.Join(s.RunDir(runID), "prompt.md"))
+}
+
 // WriteRequest stores the resolved request.
 func (s *Store) WriteRequest(runID string, request any) error {
 	return s.writeJSON(filepath.Join(s.RunDir(runID), "request.json"), request)
@@ -84,9 +91,48 @@ func (s *Store) WriteStderrTail(runID string, tail []byte) error {
 	return s.writeRunFile(runID, "stderr.tail", tail)
 }
 
-// ReadRequest decodes the run's request.json into v.
+// ReadRequest decodes the run's request.json into v. Numbers decoded into an
+// interface keep their exact digits (json.Number).
 func (s *Store) ReadRequest(runID string, v any) error {
-	return readJSON(filepath.Join(s.RunDir(runID), "request.json"), v)
+	return readJSONExact(filepath.Join(s.RunDir(runID), "request.json"), v)
+}
+
+// RunIDs lists the ids of the run directories under the home, in no
+// particular order. A home with no runs yet lists none.
+func (s *Store) RunIDs() ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(s.Home, "runs"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, e := range entries {
+		if e.IsDir() {
+			ids = append(ids, e.Name())
+		}
+	}
+	return ids, nil
+}
+
+// ConversationIDs lists the ids of the stored conversations, in no
+// particular order.
+func (s *Store) ConversationIDs() ([]string, error) {
+	entries, err := os.ReadDir(s.conversationsDir())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, e := range entries {
+		if id, ok := strings.CutSuffix(e.Name(), ".json"); ok && !e.IsDir() {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
 }
 
 // WriteState atomically replaces the run's state file.
@@ -148,6 +194,21 @@ func (s *Store) writeJSON(path string, v any) error {
 		return err
 	}
 	return writeFileAtomic(path, append(data, '\n'))
+}
+
+// readJSONExact is readJSON with numbers kept as json.Number when they land
+// in an interface, so a large integer survives the round trip.
+func readJSONExact(path string, v any) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if err := dec.Decode(v); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	return nil
 }
 
 func readJSON(path string, v any) error {

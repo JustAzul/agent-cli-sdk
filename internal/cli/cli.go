@@ -132,6 +132,8 @@ type Command struct {
 	Name    string
 	Summary string
 	Run     func(ctx *Context, args []string) int
+	// Hidden commands are internal entry points; help does not list them.
+	Hidden bool
 }
 
 var commands = map[string]Command{}
@@ -173,8 +175,10 @@ func Run(args []string, env []string, stdin io.Reader, stdout, stderr io.Writer)
 
 func usage(w io.Writer) {
 	names := make([]string, 0, len(commands))
-	for n := range commands {
-		names = append(names, n)
+	for n, c := range commands {
+		if !c.Hidden {
+			names = append(names, n)
+		}
 	}
 	sort.Strings(names)
 	fmt.Fprintln(w, "usage: agentcli <command> [flags] [prompt] [-- native flags]")

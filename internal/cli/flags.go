@@ -27,6 +27,7 @@ type turnFlags struct {
 	timeoutS      int // 0: no timeout
 	json          bool
 	dryRun        bool
+	background    bool
 	attrs         attrList
 }
 
@@ -151,6 +152,7 @@ func parseTurnArgs(ctx *Context, spec turnSpec, args []string) (p parsedTurn, ex
 	fs.Var(attrFlag{list: &f.attrs}, "attr", "attribute key=value (repeatable)")
 	fs.Var(attrFlag{list: &f.attrs, asJSON: true}, "attr-json", "attribute key=<json> (repeatable)")
 	fs.BoolVar(&f.dryRun, "dry-run", false, "print the provider plan and execute nothing")
+	fs.BoolVar(&f.background, "background", false, "admit the run as a job and return once its worker is running")
 	if spec.extra != nil {
 		spec.extra(fs)
 	}

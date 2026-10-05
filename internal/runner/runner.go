@@ -66,7 +66,11 @@ const (
 	SDKStatusProviderMissing = "provider_missing"
 	SDKStatusTimeout         = "timeout"
 	SDKStatusCancelled       = "cancelled"
+	SDKStatusInternalError   = "internal_error"
 )
+
+// exitInternal is the exit code of a run that failed inside agentcli.
+const exitInternal = 70
 
 // Run executes a foreground run to a terminal state. It returns an error only
 // for internal failures that prevent the run from starting.
@@ -182,6 +186,25 @@ func Run(job Job) (Result, error) {
 	}
 	st.UnparsedEvents = stream.unparsed
 	return j.finish(st, j.outcomeOf(end, stream, tail.Bytes())), nil
+}
+
+// Abort finalizes a run that was admitted but whose worker never started it:
+// the state turns failed (exit 70, outcome error) with the excerpt, the
+// conversation's marker is cleared and the telemetry record is appended, in
+// the order a finished run uses. The record's timestamp is the admission.
+func Abort(job Job, excerpt string) Result {
+	j := &job
+	if j.Warn == nil {
+		j.Warn = func(string) {}
+	}
+	if j.Now == nil {
+		j.Now = time.Now
+	}
+	j.startedAt = j.Now()
+	if admitted, err := time.Parse(time.RFC3339, j.State.AdmittedAt); err == nil {
+		j.startedAt = admitted
+	}
+	return j.finish(j.State, outcome{state: "failed", exitCode: exitInternal, label: "error", excerpt: excerpt, sdkStatus: SDKStatusInternalError})
 }
 
 // outcomeOf turns how the provider ended into the run's outcome.

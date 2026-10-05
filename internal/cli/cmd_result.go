@@ -1,0 +1,44 @@
+package cli
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/JustAzul/agent-cli-sdk/internal/store"
+)
+
+func init() {
+	register(Command{Name: "result", Summary: "print a finished run's output", Run: runResultCmd})
+}
+
+func runResultCmd(ctx *Context, args []string) int {
+	if len(args) != 1 {
+		return ctx.Fail(ExitUsage, "usage: agentcli result <run_id>")
+	}
+	home, err := store.ResolveHome(ctx.Getenv)
+	if err != nil {
+		return ctx.Fail(ExitInternal, "%v", err)
+	}
+	state, code := loadRun(ctx, store.Open(home), args[0])
+	if code != 0 {
+		return code
+	}
+	if !isTerminalState(state.State) {
+		return ctx.Fail(ExitBusy, "run %s is still %s; wait for it with: agentcli wait %s", state.RunID, state.State, state.RunID)
+	}
+	f, err := os.Open(state.OutputPath)
+	if errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(ctx.Stderr, "agentcli: run %s produced no output file\n", state.RunID)
+		return ExitOK
+	}
+	if err != nil {
+		return ctx.Fail(ExitInternal, "opening the output: %v", err)
+	}
+	defer f.Close()
+	if _, err := io.Copy(ctx.Stdout, f); err != nil {
+		return ctx.Fail(ExitInternal, "printing the output: %v", err)
+	}
+	return ExitOK
+}
