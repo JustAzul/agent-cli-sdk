@@ -42,7 +42,7 @@ func (adapter) ReservedFlag(arg string) bool {
 	}
 	switch name {
 	case "-o", "--output-last-message", "--json", "-C", "--cd", "-m", "--model",
-		"-s", "--sandbox", "--approve-for-me", "--ephemeral", "--yolo":
+		"-s", "--sandbox", "-p", "--profile", "--approve-for-me", "--ephemeral", "--yolo":
 		return true
 	}
 	if strings.HasPrefix(name, "--dangerously-") {
@@ -51,7 +51,7 @@ func (adapter) ReservedFlag(arg string) bool {
 	// Short flags with an attached value: -mfoo, -s=read-only, -C/x, -ofile.
 	if !strings.HasPrefix(arg, "--") && len(arg) > 2 {
 		switch arg[:2] {
-		case "-o", "-C", "-m", "-s":
+		case "-o", "-C", "-m", "-s", "-p":
 			return true
 		}
 	}
@@ -81,18 +81,21 @@ func configOverride(arg string) (string, bool) {
 }
 
 // reservedConfigKey is true for the config keys the SDK controls through its
-// own flags: model, model_reasoning_effort and any sandbox* key.
+// own flags or that select a provider config profile (which can itself set
+// the model and sandbox): model, model_reasoning_effort, profile and any
+// sandbox* key.
 func reservedConfigKey(override string) bool {
 	key, _, _ := strings.Cut(override, "=")
 	key = strings.TrimSpace(key)
-	return key == "model" || key == "model_reasoning_effort" || strings.HasPrefix(key, "sandbox")
+	return key == "model" || key == "model_reasoning_effort" || key == "profile" || strings.HasPrefix(key, "sandbox")
 }
 
 func (adapter) VersionArgs() []string { return []string{"--version"} }
 
 func (adapter) BuildPlan(req provider.Request) (provider.Plan, error) {
-	if req.Command != "exec" {
-		return provider.Plan{}, fmt.Errorf("codex: command %q is not implemented yet", req.Command)
+	tail, stdin, err := planTail(req)
+	if err != nil {
+		return provider.Plan{}, err
 	}
 	argv := []string{"codex", "exec", "-C", req.Cwd}
 	if req.Sandbox != "" {
@@ -109,14 +112,41 @@ func (adapter) BuildPlan(req provider.Request) (provider.Plan, error) {
 		argv = append(argv, "--skip-git-repo-check")
 	}
 	argv = append(argv, req.Passthrough...)
-	argv = append(argv, "-")
+	argv = append(argv, tail...)
 	return provider.Plan{
 		Argv:      argv,
-		Stdin:     provider.StdinPrompt,
+		Stdin:     stdin,
 		Dir:       req.Cwd,
 		EnvAdd:    map[string]string{},
 		EnvRemove: []string{},
 	}, nil
+}
+
+// planTail is the part of the argv that follows the shared flags, and what
+// the provider receives on standard input. A review takes no prompt, so its
+// standard input is empty.
+func planTail(req provider.Request) ([]string, provider.StdinSource, error) {
+	switch req.Command {
+	case "exec":
+		return []string{"-"}, provider.StdinPrompt, nil
+	case "resume":
+		if req.SessionID == "" {
+			return nil, "", fmt.Errorf("codex: resume needs a provider session id")
+		}
+		return []string{"resume", req.SessionID, "-"}, provider.StdinPrompt, nil
+	case "review":
+		switch req.ReviewTarget {
+		case "uncommitted":
+			return []string{"review", "--uncommitted"}, provider.StdinEmpty, nil
+		case "base", "commit":
+			if req.ReviewRef == "" {
+				return nil, "", fmt.Errorf("codex: review --%s needs a value", req.ReviewTarget)
+			}
+			return []string{"review", "--" + req.ReviewTarget, req.ReviewRef}, provider.StdinEmpty, nil
+		}
+		return nil, "", fmt.Errorf("codex: review needs a target (base, uncommitted or commit), got %q", req.ReviewTarget)
+	}
+	return nil, "", fmt.Errorf("codex: unknown command %q", req.Command)
 }
 
 // insideGitWorkTree walks up from dir looking for a .git entry (a directory,

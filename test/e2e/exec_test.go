@@ -13,7 +13,7 @@ const execOKThread = "00000000-0000-4000-8000-000000000001"
 func TestExecForeground(t *testing.T) {
 	s := newSandbox(t).set("FAKECODEX_FIXTURE", fixture("exec-ok"))
 	rec := s.recordTo()
-	cwd := gitRepo(t)
+	cwd := symlinkedGitRepo(t)
 	r := s.run("exec", "--scenario", "second-opinion", "--cwd", cwd, "--run-id", "fg1", "q")
 	if r.code != 0 {
 		t.Fatalf("exit %d stderr %s", r.code, r.stderr)
@@ -82,7 +82,7 @@ func TestExecForeground(t *testing.T) {
 	}
 
 	fake := readRecord(t, rec)
-	if fake.Stdin != "q" || fake.Cwd != cwd {
+	if fake.Stdin != "q" || !samePath(t, fake.Cwd, cwd) {
 		t.Errorf("fake saw stdin=%q cwd=%q", fake.Stdin, fake.Cwd)
 	}
 	// second-opinion carries its built-in profile.

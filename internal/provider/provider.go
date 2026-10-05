@@ -63,14 +63,18 @@ const (
 
 // Request is the provider-neutral description of one turn.
 type Request struct {
-	Command     string // "exec", "review" or "resume"
-	Cwd         string
-	Model       string
-	Effort      string
-	Sandbox     string
-	SessionID   string // provider session id, for resume
-	Passthrough []string
-	OutputPath  string
+	Command   string // "exec", "review" or "resume"
+	Cwd       string
+	Model     string
+	Effort    string
+	Sandbox   string
+	SessionID string // provider session id, for resume
+	// ReviewTarget is "base", "uncommitted" or "commit" for a review; ReviewRef
+	// is the branch or commit it names (empty for "uncommitted").
+	ReviewTarget string
+	ReviewRef    string
+	Passthrough  []string
+	OutputPath   string
 }
 
 // Plan is how to start the provider process.

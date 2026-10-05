@@ -2,7 +2,6 @@ package cli
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,15 +11,16 @@ import (
 	"github.com/JustAzul/agent-cli-sdk/internal/provider"
 	"github.com/JustAzul/agent-cli-sdk/internal/runner"
 	"github.com/JustAzul/agent-cli-sdk/internal/store"
-	"github.com/JustAzul/agent-cli-sdk/internal/telemetry"
 )
 
 func init() {
 	register(Command{Name: "exec", Summary: "start a conversation and run its first turn", Run: runExec})
 }
 
+var execSpec = turnSpec{name: "exec", usage: "[flags] <prompt | -> [-- native flags]"}
+
 func runExec(ctx *Context, args []string) int {
-	p, exit, done := parseTurnArgs(ctx, "exec", args)
+	p, exit, done := parseTurnArgs(ctx, execSpec, args)
 	if done {
 		return exit
 	}
@@ -54,76 +54,13 @@ func runExec(ctx *Context, args []string) int {
 	if err != nil {
 		return ctx.Fail(ExitInternal, "%v", err)
 	}
-	st := store.Open(home)
-	now := ctx.Now().UTC()
-	runID, code := chooseRunID(ctx, st, p.runID, now)
-	if code != 0 {
-		return code
-	}
-
-	outputPath := st.OutputPath(runID)
-	req := provider.Request{
-		Command:     "exec",
-		Cwd:         cwd,
-		Model:       eff.Model,
-		Effort:      eff.Effort,
-		Sandbox:     eff.Sandbox,
-		Passthrough: p.passthrough,
-		OutputPath:  outputPath,
-	}
-	plan, err := prov.BuildPlan(req)
-	if err != nil {
-		return ctx.Fail(ExitInternal, "building the provider plan: %v", err)
-	}
-
-	if p.dryRun {
-		return printJSON(ctx, struct {
-			Command  string `json:"command"`
-			Provider string `json:"provider"`
-			RunID    string `json:"run_id"`
-			provider.Plan
-		}{"exec", p.provider, runID, plan})
-	}
-
-	conversationID := store.NewConversationID(now)
-	ctx.IDs["run_id"], ctx.IDs["conversation_id"] = runID, conversationID
-	if err := admit(st, admission{
-		runID: runID, conversationID: conversationID, flags: p.turnFlags, effective: eff,
-		cwd: cwd, prompt: prompt, passthrough: p.passthrough, plan: plan, now: now,
-	}); err != nil {
-		if errors.Is(err, store.ErrRunExists) {
-			delete(ctx.IDs, "run_id")
-			delete(ctx.IDs, "conversation_id")
-			return ctx.Fail(ExitUsage, "run id %q already exists", runID)
-		}
-		return ctx.Fail(ExitInternal, "admitting the run: %v", err)
-	}
-
-	state, err := st.ReadState(runID)
-	if err != nil {
-		return ctx.Fail(ExitInternal, "reading the admitted state: %v", err)
-	}
-	res, err := runner.Run(runner.Job{
-		Store: st, Provider: prov, Plan: plan, Prompt: prompt, Env: ctx.Env, State: state,
-		CleanSentinel: p.cleanSentinel, MaterialLabel: p.materialLabel,
-		Warn: func(msg string) { ctx.Warnf("%s", msg) }, Now: ctx.Now,
-		Record: telemetry.Record{
-			Provider: p.provider, Command: "exec", Scenario: p.scenario,
-			Model: nullable(eff.Model), ModelSource: eff.ModelSource,
-			Effort: nullable(eff.Effort), EffortSource: eff.EffortSource,
-			Sandbox: nullable(eff.Sandbox), Source: p.source, SessionID: p.sessionID,
-			Cwd: cwd, Attrs: p.attrs.object(),
+	return runTurn(ctx, turn{
+		command: "exec", flags: p, prov: prov, eff: eff, cwd: cwd, prompt: prompt, st: store.Open(home),
+		req: provider.Request{
+			Command: "exec", Cwd: cwd, Model: eff.Model, Effort: eff.Effort, Sandbox: eff.Sandbox,
+			Passthrough: p.passthrough,
 		},
 	})
-	if err != nil {
-		return ctx.Fail(ExitInternal, "%v", err)
-	}
-
-	if p.json {
-		return printRunResult(ctx, res)
-	}
-	io.WriteString(ctx.Stdout, res.State.OutputPath+"\n")
-	return res.ExitCode
 }
 
 // printRunResult prints the --json object for a finished run and returns its

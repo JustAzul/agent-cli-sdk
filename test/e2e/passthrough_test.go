@@ -28,6 +28,12 @@ func TestReservedPassthrough(t *testing.T) {
 		{"-c", "model_reasoning_effort=low"},
 		{"-c", "sandbox_permissions=[]"},
 		{"--config", "sandbox_mode=x"},
+		{"-p", "work"},
+		{"--profile", "work"},
+		{"--profile=work"},
+		{"-pwork"},
+		{"-c", "profile=work"},
+		{"--config", "profile=work"},
 	}
 	for _, flags := range cases {
 		name := strings.Join(flags, " ")

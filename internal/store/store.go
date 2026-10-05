@@ -84,6 +84,11 @@ func (s *Store) WriteStderrTail(runID string, tail []byte) error {
 	return s.writeRunFile(runID, "stderr.tail", tail)
 }
 
+// ReadRequest decodes the run's request.json into v.
+func (s *Store) ReadRequest(runID string, v any) error {
+	return readJSON(filepath.Join(s.RunDir(runID), "request.json"), v)
+}
+
 // WriteState atomically replaces the run's state file.
 func (s *Store) WriteState(runID string, st State) error {
 	return s.writeJSON(filepath.Join(s.RunDir(runID), "state.json"), st)
@@ -96,8 +101,14 @@ func (s *Store) ReadState(runID string) (State, error) {
 	return st, err
 }
 
+func (s *Store) conversationsDir() string { return filepath.Join(s.Home, "conversations") }
+
 func (s *Store) conversationPath(id string) string {
-	return filepath.Join(s.Home, "conversations", id+".json")
+	return filepath.Join(s.conversationsDir(), id+".json")
+}
+
+func (s *Store) conversationLockPath(id string) string {
+	return filepath.Join(s.conversationsDir(), id+".lock")
 }
 
 // CreateConversation writes a new conversation record.
@@ -115,9 +126,14 @@ func (s *Store) ReadConversation(id string) (Conversation, error) {
 	return c, err
 }
 
-// UpdateConversation read-modify-writes a conversation record. It takes no
-// lock yet; conversation locking arrives with admission.
+// UpdateConversation read-modify-writes a conversation record under the
+// conversation lock, so it never interleaves with an admission.
 func (s *Store) UpdateConversation(id string, mutate func(*Conversation)) error {
+	unlock, err := s.lockConversation(id)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	c, err := s.ReadConversation(id)
 	if err != nil {
 		return err

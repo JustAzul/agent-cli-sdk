@@ -44,7 +44,7 @@ type Record struct {
 	EffortSource      string          `json:"effort_source"`
 	Sandbox           *string         `json:"sandbox"`
 	Source            string          `json:"source"`
-	SessionID         string          `json:"session_id"`
+	SessionID         *string         `json:"session_id"`
 	ConversationID    string          `json:"conversation_id"`
 	Turn              int             `json:"turn"`
 	Cwd               string          `json:"cwd"`

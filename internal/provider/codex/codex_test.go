@@ -41,6 +41,63 @@ func TestBuildPlanExecArgvOrder(t *testing.T) {
 	}
 }
 
+func TestBuildPlanReviewTails(t *testing.T) {
+	cwd := gitDir(t)
+	cases := []struct {
+		target, ref string
+		tail        []string
+	}{
+		{"base", "main", []string{"review", "--base", "main"}},
+		{"uncommitted", "", []string{"review", "--uncommitted"}},
+		{"commit", "abc123", []string{"review", "--commit", "abc123"}},
+	}
+	for _, c := range cases {
+		plan, err := codex.New().BuildPlan(provider.Request{
+			Command: "review", Cwd: cwd, Model: "m", OutputPath: "/o", Passthrough: []string{"--x"},
+			ReviewTarget: c.target, ReviewRef: c.ref,
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", c.target, err)
+		}
+		want := append([]string{"codex", "exec", "-C", cwd, "-m", "m", "--json", "-o", "/o", "--x"}, c.tail...)
+		if !reflect.DeepEqual(plan.Argv, want) {
+			t.Errorf("%s argv\n got %q\nwant %q", c.target, plan.Argv, want)
+		}
+		if plan.Stdin != provider.StdinEmpty {
+			t.Errorf("%s stdin = %q, want empty", c.target, plan.Stdin)
+		}
+	}
+}
+
+func TestBuildPlanReviewNeedsATarget(t *testing.T) {
+	if _, err := codex.New().BuildPlan(provider.Request{Command: "review", Cwd: t.TempDir(), OutputPath: "/o"}); err == nil {
+		t.Error("review without a target built a plan")
+	}
+	if _, err := codex.New().BuildPlan(provider.Request{Command: "review", Cwd: t.TempDir(), OutputPath: "/o", ReviewTarget: "base"}); err == nil {
+		t.Error("review --base without a ref built a plan")
+	}
+}
+
+func TestBuildPlanResumeTail(t *testing.T) {
+	cwd := gitDir(t)
+	plan, err := codex.New().BuildPlan(provider.Request{
+		Command: "resume", Cwd: cwd, Effort: "low", SessionID: "T-1", OutputPath: "/o", Passthrough: []string{"--x"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"codex", "exec", "-C", cwd, "-c", "model_reasoning_effort=low", "--json", "-o", "/o", "--x", "resume", "T-1", "-"}
+	if !reflect.DeepEqual(plan.Argv, want) {
+		t.Errorf("argv\n got %q\nwant %q", plan.Argv, want)
+	}
+	if plan.Stdin != provider.StdinPrompt {
+		t.Errorf("stdin = %q, want prompt", plan.Stdin)
+	}
+	if _, err := codex.New().BuildPlan(provider.Request{Command: "resume", Cwd: cwd, OutputPath: "/o"}); err == nil {
+		t.Error("resume without a session id built a plan")
+	}
+}
+
 func TestBuildPlanOmitsUnsetFlags(t *testing.T) {
 	cwd := gitDir(t)
 	plan, err := codex.New().BuildPlan(provider.Request{Command: "exec", Cwd: cwd, OutputPath: "/o"})
@@ -128,6 +185,8 @@ func TestReservedFlag(t *testing.T) {
 		"--approve-for-me", "--ephemeral",
 		"-c model=x", "-c model_reasoning_effort=low", "-c sandbox_permissions=[]", "-c sandbox_mode=x",
 		"--config model=x", "--config=model=x", "-cmodel=x", "-c=model=x", "-c model = x",
+		"-p", "--profile", "--profile=work", "-pwork", "-p=work",
+		"-c profile=work", "--config profile=work", "--config=profile=work", "-cprofile=work", "-c=profile=work", "-c profile = work",
 	}
 	for _, a := range reserved {
 		if !p.ReservedFlag(a) {
@@ -137,6 +196,7 @@ func TestReservedFlag(t *testing.T) {
 	allowed := []string{
 		"-c features.web_search=true", "-c", "features.web_search=true", "--add-dir", "/tmp/x",
 		"--add-dir /tmp/x", "-c model_providers.x.name=y", "-c models=1", "-i", "--skip-git-repo-check",
+		"-c profiler=1",
 	}
 	for _, a := range allowed {
 		if p.ReservedFlag(a) {

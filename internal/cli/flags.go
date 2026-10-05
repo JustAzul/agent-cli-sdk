@@ -89,12 +89,22 @@ type parsedTurn struct {
 	turnFlags
 	positional  []string
 	passthrough []string
+	// given holds the names of the flags the caller passed explicitly, so a
+	// command can tell "not passed" from a flag's default.
+	given map[string]bool
+}
+
+// turnSpec describes one turn command for parseTurnArgs.
+type turnSpec struct {
+	name  string
+	usage string                 // synopsis printed after "agentcli <name> "
+	extra func(fs *flag.FlagSet) // registers the command's own flags; may be nil
 }
 
 // parseTurnArgs parses the flags of a turn command with the standard library.
 // Flags and positionals may be interspersed; everything after the first bare
 // "--" is native passthrough, verbatim. exit is meaningful when done is true.
-func parseTurnArgs(ctx *Context, name string, args []string) (p parsedTurn, exit int, done bool) {
+func parseTurnArgs(ctx *Context, spec turnSpec, args []string) (p parsedTurn, exit int, done bool) {
 	head := args
 	for i, a := range args {
 		if a == "--" {
@@ -104,9 +114,9 @@ func parseTurnArgs(ctx *Context, name string, args []string) (p parsedTurn, exit
 		}
 	}
 
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs := flag.NewFlagSet(spec.name, flag.ContinueOnError)
 	fs.SetOutput(ctx.Stderr)
-	fs.Usage = func() { fmt.Fprintf(ctx.Stderr, "usage: agentcli %s [flags] <prompt | -> [-- native flags]\n", name) }
+	fs.Usage = func() { fmt.Fprintf(ctx.Stderr, "usage: agentcli %s %s\n", spec.name, spec.usage) }
 	f := &p.turnFlags
 	fs.StringVar(&f.provider, "provider", "codex", "provider to run")
 	fs.StringVar(&f.scenario, "scenario", "adhoc", "caller's label for the run's purpose")
@@ -124,6 +134,9 @@ func parseTurnArgs(ctx *Context, name string, args []string) (p parsedTurn, exit
 	fs.Var(attrFlag{list: &f.attrs}, "attr", "attribute key=value (repeatable)")
 	fs.Var(attrFlag{list: &f.attrs, asJSON: true}, "attr-json", "attribute key=<json> (repeatable)")
 	fs.BoolVar(&f.dryRun, "dry-run", false, "print the provider plan and execute nothing")
+	if spec.extra != nil {
+		spec.extra(fs)
+	}
 
 	rest := head
 	for {
@@ -138,6 +151,8 @@ func parseTurnArgs(ctx *Context, name string, args []string) (p parsedTurn, exit
 		}
 		ctx.JSON = p.json
 		if fs.NArg() == 0 {
+			p.given = map[string]bool{}
+			fs.Visit(func(f *flag.Flag) { p.given[f.Name] = true })
 			return p, 0, false
 		}
 		p.positional = append(p.positional, fs.Arg(0))
