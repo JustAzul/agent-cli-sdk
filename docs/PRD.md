@@ -68,7 +68,6 @@ Cross-model review is a recurring part of the owner's workflow: about 42 dispatc
 - Windows.
 - A user-editable profile override file.
 - Concurrency caps, queues or a resident daemon.
-- Garbage collection of old run directories.
 - The dormant proof-of-concept that references the old wrapper path.
 - Fixing why the reflection hook fails so often. v1 only makes the failure reason visible.
 
@@ -295,6 +294,15 @@ Acceptance Criteria:
 | FR57 | Real smokes on the owner's machine with the installed binary, one per scenario at its profile defaults (second-opinion, code-review, cross-check, expert-persona, delegation), plus one two-turn conversation and one job with `wait`. Each must end with outcome other than `error`/`lost` and a telemetry record. | P0 |
 | FR58 | End-to-end: a real commit in a repository during a live Claude Code session triggers the migrated post-commit hook, which reviews through `agentcli` and records `source: hook-post-commit`. | P0 |
 | FR59 | Install check: after installing from the GitHub marketplace, `agentcli` resolves from Claude's Bash tool, and after a session start the launcher resolves from a settings hook. | P0 |
+
+#### O. Retention
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR60 | `agentcli prune [--older-than <days>] [--dry-run] [--json]` removes the directories of terminal runs whose `ended_at` is older than the given number of days (default 30, or `AGENTCLI_RETENTION_DAYS`). **Strategy:** a run is removed only when its state is terminal with a parseable `ended_at`, its run lock can be taken without blocking, its state is still terminal and old enough when re-read under that lock, and no conversation's active-turn marker names it. Runs with a missing or malformed state are skipped and counted. Telemetry files and conversation records are never removed. After a run is pruned, every reader (`status`, `wait`, `result`, `cancel`, `annotate`, `send` by run id) treats its id as not found (exit 4); a reader that finds its run directory gone mid-read also exits 4. | P0 |
+| FR61 | Automatic retention: the plugin's `SessionStart` hook runs `agentcli prune --auto` after `link`. `--auto` prunes at most once per 24 hours per home (a stamp file under a lock), stops after a 3-second time budget and resumes on a later day, prints nothing unless it fails, and is disabled by `AGENTCLI_NO_PRUNE=1`. | P0 |
+| FR62 | `status` without a run id reads a per-session index instead of every run directory. **Strategy:** admission appends the run id to the index of the run's session id (`index/sessions/<session id>`; an empty session id uses a fixed key); `status` reads the newest entries of that one index and skips ids whose run directory is gone. A session without an index has no runs. Runs admitted before the index existed are not listed by session. `prune` removes an index file once none of its runs remain. | P0 |
+| FR63 | A conversation record keeps the sources of its defaults (`model_source`, `effort_source`, `sandbox_source`), so `send` does not depend on the first turn's run directory. Conversations written before this field existed fall back to the first turn's request when it still exists, else to `profile`. | P0 |
 
 ### Non-Functional Requirements
 - **Performance:** wrapper overhead within the success-metric target. Startup does not read the full telemetry history (only `runs`/`stats` do). Telemetry writes are one append. *Assumption: overhead target needs validation by benchmark.*

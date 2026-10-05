@@ -143,7 +143,8 @@ timeout, clean sentinel, material label, attrs, passthrough) plus the plan.
   "provider": "codex",
   "provider_session_id": null,
   "cwd": "absolute path",
-  "defaults": {"scenario": "…", "model": "…", "effort": "…", "sandbox": "…"},
+  "defaults": {"scenario": "…", "model": "…", "effort": "…", "sandbox": "…",
+               "model_source": "flag|profile|provider-default", "effort_source": "…", "sandbox_source": "…"},
   "turns": ["r-…"],
   "active_run_id": null,
   "created_at": "RFC3339 UTC",
@@ -154,6 +155,10 @@ timeout, clean sentinel, material label, attrs, passthrough) plus the plan.
 `status` (`busy`/`idle`) and `resumable` are derived on read, not stored.
 
 A cancel request is the presence of `runs/<run_id>/cancel.request`.
+
+Retention files: `index/sessions/<session id>` (one run id per line, appended at
+admission; an empty session id uses the key `_`) and `prune.stamp` (the time of
+the last `prune --auto`, written under `prune.lock`). Both live under the home.
 
 `runs/<run_id>/worker.log` is the stderr of a job's worker (0600), bounded to
 its last 64 KiB like `stderr.tail`; runner warnings raised inside a job land
