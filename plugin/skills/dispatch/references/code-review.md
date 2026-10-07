@@ -21,7 +21,10 @@ agentcli review --scenario code-review --base master --background --json
 agentcli review --scenario code-review --commit <sha> --background --json
 ```
 
-Then `wait` and `result` as in SKILL.md. The mod has no review tool; use the CLI.
+Then `wait` and `result` as in SKILL.md. With the plugin loaded, the
+`agent-cli:code-review` agent type runs the same review as a background agent:
+its whole prompt is the target, `uncommitted`, `base <branch>` or
+`commit <sha>`.
 
 ## When not to use this
 

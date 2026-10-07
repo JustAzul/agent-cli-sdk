@@ -38,6 +38,11 @@ Shared by `exec`, `review` and `send`:
   ignored), otherwise the label (default `ok`). Use them when "nothing to report"
   is a known sentence.
 - `--run-id <id>`: choose the run id (letters, digits, `.`, `_`, `-`; must be new).
+- `--agent-feedback` (or `AGENTCLI_AGENT_FEEDBACK=1`): show the run as a
+  background agent in its Claude Code session while it works. It needs a
+  session id (`--session-id`, else `$CLAUDE_CODE_SESSION_ID`); without one the
+  run goes ahead unflagged and stderr says why. The agent's completion is not
+  handed to Claude: whoever started the run delivers its result.
 - `--dry-run`: print the resolved plan as JSON and execute nothing.
 - `--json`: one JSON object instead of the output path.
 - `-- <native flags>`: passed to the provider. `-o`, `--json`, `-C`, `-m`, `-s`,
@@ -53,8 +58,9 @@ conceptual question needs no extra flag.
 
 `--json` output carries `run_dir`. Under it: `prompt.md` (what was sent),
 `output.md` (the final message), `state.json`, `stderr.tail` (the last 64 KiB of
-provider stderr; read it first when a run errors), `request.json`, and for a
-job `worker.log` (the worker's own diagnostics). The home is
+provider stderr; read it first when a run errors), `request.json`,
+`progress.jsonl` (what the provider did while it worked), and for a job
+`worker.log` (the worker's own diagnostics). The home is
 `$AGENTCLI_HOME`, else `$XDG_STATE_HOME/agentcli`, else `~/.local/state/agentcli`.
 
 ## Reading history
@@ -64,6 +70,12 @@ job `worker.log` (the worker's own diagnostics). The home is
 - `agentcli conversations [--json]`: provider, turns, busy/idle, last activity.
 - `agentcli cancel <run_id> [--json]`: stop a queued or running run (it ends
   `cancelled`, 130); on a finished run it changes nothing and exits 0.
-- `agentcli runs [--days N | --all]`: folded telemetry, one JSON object per run.
-- `agentcli stats [--days N | --all] [--json]`: totals, outcomes, durations,
-  reliability, findings summary.
+- `agentcli progress <run_id> [--from N] [--json]`: what the provider has done
+  so far (commands it started, text it wrote); `--json` returns `next`, to pass
+  back as `--from` to read only what is new.
+- `agentcli runs [--days N | --all] [--session-id ID]`: folded telemetry, one
+  JSON object per run, with `model_used`/`effort_used` (what the provider ran
+  with) beside the requested `model`/`effort`.
+- `agentcli stats [--days N | --all] [--session-id ID] [--json]`: totals,
+  outcomes, durations, reliability, findings summary, tokens in total and per
+  model (`usage_by_model`).

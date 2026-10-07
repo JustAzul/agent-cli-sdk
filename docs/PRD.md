@@ -55,7 +55,7 @@ Cross-model review is a recurring part of the owner's workflow: about 42 dispatc
 ### In Scope
 - The `agentcli` binary: CLI surface, provider interface, Codex adapter, conversations, jobs, run artifacts, telemetry, profiles, launcher.
 - Distribution as a Claude Code plugin from a new public repository: marketplace manifest on the default branch, prebuilt plugin on a CI-built `dist` branch.
-- A thin mod: native tools for Claude, job-completion notices, a job status line, and a `/agent-cli-jobs` command.
+- A thin mod: one agent type per scenario that dispatches show as native background agents, native tools for Claude, job-completion notices, a status line with running jobs and the session's tokens, and a `/agent-cli-jobs` command.
 - A provider-agnostic dispatch skill (a rewrite of the current Codex skill) with evals.
 - Migration of every live consumer in the owner's private configuration, import of the legacy telemetry, and removal of the old wrapper and skill.
 - Installation on the owner's machine and end-to-end validation (real per-scenario smokes, a real post-commit hook review).
@@ -304,13 +304,25 @@ Acceptance Criteria:
 | FR62 | `status` without a run id reads a per-session index instead of every run directory. **Strategy:** admission appends the run id to the index of the run's session id (`index/sessions/<session id>`; an empty session id uses a fixed key); `status` reads the newest entries of that one index and skips ids whose run directory is gone. A session without an index has no runs. Runs admitted before the index existed are not listed by session. `prune` removes an index file once none of its runs remain. | P0 |
 | FR63 | A conversation record keeps the sources of its defaults (`model_source`, `effort_source`, `sandbox_source`), so `send` does not depend on the first turn's run directory. Conversations written before this field existed fall back to the first turn's request when it still exists, else to `profile`. | P0 |
 
+#### P. Agent types, progress and agent feedback
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR64 | The mod registers one background agent type per scenario (`<plugin>:second-opinion`, `:code-review`, `:cross-check`, `:expert-persona`, `:delegation`, `:adhoc`), dispatched through the Agent tool. **Strategy:** a `turn.step` hook answers every model request of these subagents with an agentcli job (`--background`, source `agent`, the scenario's profile), never with a Claude model. Every failure answers with a line saying the hand-off failed: the hook's own errors, its `.catch`, a refused tool call inside the subagent, and a registered fallback (cheapest model, one read-only tool, a prompt that makes it say so). The types are offered to the model only once the dispatch skill has loaded in the session, recorded per session id. | P0 |
+| FR65 | A SendMessage to such an agent runs `send` on its conversation (agent id → conversation id kept in the plugin store, the 500 most recent); a later turn whose conversation is no longer recorded answers that it cannot resume instead of starting a new one. `:code-review` reads its whole prompt as the target: `uncommitted`, `base <branch>` or `commit <sha>`. Interrupting the agent (Esc, TaskStop) cancels its run. The answer is the output cut at 64 KiB, led by how the run ended when it did not deliver, and closed by `[agentcli run <run_id> · conversation <conversation_id> · <outcome>]`. | P0 |
+| FR66 | While a run works, the runner appends what the provider does to `runs/<run_id>/progress.jsonl`: one line per entry `{seq, at, kind, text}`, `kind` one of `command`, `message`, `reasoning`, the text folded to one line of at most 500 bytes. `agentcli progress <run_id> [--from <n>] [--json]` prints the entries numbered from `n`; `--json` prints `{run_id, state, next, entries}`. A malformed complete line is an error; an unterminated last line is left for the next read. | P0 |
+| FR67 | An agent-cli subagent's row shows its run as it works: the step hook waits in 5-second slices and streams each slice's new progress as thinking (shown, not recorded), with an elapsed-time line after 30 seconds with no new progress. | P0 |
+| FR68 | `exec`, `review` and `send` take `--agent-feedback`; `AGENTCLI_AGENT_FEEDBACK=1` sets its default. The run records `agent_feedback` in `request.json` and `status --json`. It needs a session id: without one the run goes ahead with `agent_feedback: false` and one stderr line saying why. | P0 |
+| FR69 | A run of the session with `agent_feedback: true`, not started by the agent types and not yet terminal when the 15-second poll sees it, is shown once as a background agent: the mod spawns the hidden `<plugin>:run` type, which follows that run (FR67) and starts none, and answers one line. That type is never offered to the model, and its completion notice is dropped before it reaches Claude: the caller that started the run delivers its result. | P0 |
+| FR70 | Each run record carries `model_used` and `effort_used`, what the provider reports it ran with, read before the run releases its conversation (for codex, the last `turn_context` of its session file; null when there is none). `stats` adds `usage_by_model`; `stats` and `runs` take `--session-id`. The status line adds the session's token use (`Codex <in> in · <out> out`), read again only when another of its runs ends. | P0 |
+
 ### Non-Functional Requirements
 - **Performance:** wrapper overhead within the success-metric target. Startup does not read the full telemetry history (only `runs`/`stats` do). Telemetry writes are one append. *Assumption: overhead target needs validation by benchmark.*
 - **Security:** never `danger-full-access`. Reserved native flags are blocked (FR14). Prompts and outputs stay local under the home directory with user-only permissions (directories 0700, files 0600). Telemetry never records the prompt text.
 - **Portability:** linux and darwin on amd64 and arm64. Static binaries with no cgo. POSIX `sh` for shims and the launcher.
 - **Reliability:** state transitions are atomic replaces. Telemetry survives crashes mid-write (FR30). A crashed worker is detected as `lost` (FR23). No path can leave a conversation permanently busy.
 - **Privacy:** FR44 for the public repository. No telemetry or artifact leaves the machine.
-- **Accessibility:** not applicable. The product is a CLI, a mod drawing only a status line and toasts, and a skill. No visual UI beyond Claude Code's own.
+- **Accessibility:** not applicable. The product is a CLI, a mod drawing only a status line and toasts and otherwise using Claude Code's own agent rows, and a skill. No visual UI beyond Claude Code's own.
 - **Compatibility:** codex-cli 0.159.3 behaviours are the reference (Appendix A). Claude Code with mods and plugin `bin/` support (installed build 2.1.289).
 
 ---

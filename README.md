@@ -125,6 +125,8 @@ holds:
 - `prompt.md`, `request.json` and `state.json`;
 - `output.md`;
 - `stderr.tail`, the last 64 KiB of provider stderr;
+- `progress.jsonl`, what the provider did while it worked (`agentcli progress
+  <run_id>` prints it);
 - for a job, `worker.log`.
 
 ## Scenarios and profiles
@@ -151,6 +153,9 @@ file per UTC month. Files are never rewritten.
 A record carries:
 - run and conversation ids, turn, provider and provider version;
 - command, scenario, model/effort/sandbox and their sources;
+- `model_used` and `effort_used`, what the provider reports it actually ran
+  with (for Codex, read from its own session file), so a run on the provider's
+  default model records that model too;
 - source, session id, cwd;
 - exit code, outcome, duration, timeout;
 - output path and size, error excerpt, token usage;
@@ -172,7 +177,8 @@ reader:
 ```sh
 agentcli runs --days 30 | jq 'select(.attrs["review.findings"].high > 0)'
 agentcli stats --days 7      # volume, outcomes, durations, reliability, findings, usage
-agentcli stats --all --json
+agentcli stats --all --json  # usage_totals, and usage_by_model per model
+agentcli stats --session-id "$CLAUDE_CODE_SESSION_ID"   # one Claude Code session's runs and tokens
 ```
 
 ## Inside Claude Code
@@ -186,7 +192,25 @@ The **skill** teaches Claude:
 - to quote the other agent's findings with attribution, and to disagree openly
   when it disagrees.
 
-The **mod** adds three tools that always start background jobs:
+The **mod** registers one agent type per scenario, `agent-cli:second-opinion`,
+`:code-review`, `:cross-check`, `:expert-persona`, `:delegation` and `:adhoc`.
+Claude dispatches through the Agent tool, and the run behaves like any
+background agent:
+- its row streams what the provider is doing (commands it starts, text it
+  writes, an elapsed-time line when it is quiet);
+- the native completion notification carries the output;
+- a SendMessage to the agent sends the next turn of the same conversation;
+- stopping the agent cancels its run.
+
+No Claude model runs inside these agents: the mod answers each of their
+requests with an agentcli job. A dispatch that fails says so in its answer
+instead of falling back to a Claude reply. The types are offered to Claude only
+once the dispatch skill has loaded in the session, so it does not reach for
+another agent unasked. `agent-cli:code-review` takes its target as the whole
+prompt: `uncommitted`, `base <branch>` or `commit <sha>`.
+
+The mod also adds three tools that start background jobs, for overrides the
+agent types do not carry:
 
 | Tool | Does |
 |---|---|
@@ -194,12 +218,16 @@ The **mod** adds three tools that always start background jobs:
 | `mcp__agent-cli__send` | continues one (`conversation_id`, `prompt`) |
 | `mcp__agent-cli__jobs` | `list`, `status`, `result` or `cancel` |
 
-When a job started through the mod finishes, the mod:
-- shows a toast;
-- hands Claude a notice with the outcome and the output (inline up to 8 KiB);
-- counts running jobs in a status line.
+When a job started through these tools finishes, the mod shows a toast and
+hands Claude a notice with the outcome and the output (inline up to 8 KiB).
 
-`/agent-cli-jobs` lists the session's jobs at once, even while Claude is working.
+A run any other caller starts with `--agent-feedback` (see below) shows as a
+background agent of its session too, for as long as it runs. Its completion is
+not handed to Claude: the caller that started it delivers its result.
+
+The status line counts the session's running jobs and its Codex token use
+(`Codex 1.4M in · 7.2k out`). `/agent-cli-jobs` lists the session's jobs at
+once, even while Claude is working.
 
 ## Using it from hooks and scripts
 
@@ -214,6 +242,11 @@ out=$("$agentcli" exec --scenario code-review --source hook-post-commit \
 ```
 
 Useful flags:
+- `--agent-feedback` shows the run as a background agent in its Claude Code
+  session while it works; `AGENTCLI_AGENT_FEEDBACK=1` does the same for a
+  caller that cannot change its arguments (an older agentcli ignores the
+  variable). It needs a session id; without one the run goes ahead unflagged
+  and stderr says why.
 - `--source` labels who dispatched the run, for `stats`.
 - `--session-id` ties the run to a Claude Code session. It defaults to
   `$CLAUDE_CODE_SESSION_ID`.

@@ -83,6 +83,21 @@ Unless stated otherwise:
 
 ---
 
+## Agent types, progress and agent feedback
+
+- [ ] **agent type answers (FR64, FR67):** in a session with the plugin, after the dispatch skill loads, Claude calls `Agent(subagent_type: "agent-cli:second-opinion", prompt: "q")`.
+  - A background agent row appears and streams the run's progress as thinking.
+  - The completion notification carries the output and the `[agentcli run … · conversation … · ok]` trailer.
+  - No Claude model request is made for the subagent; telemetry has one run with source `agent`.
+- [ ] **gate (FR64):** before the dispatch skill loads, `Agent(subagent_type: "agent-cli:adhoc")` is refused as an unknown type; after it loads, the call is accepted. Loading it in another session does not close this one.
+- [ ] **follow-up (FR65):** a SendMessage to a finished agent-cli agent runs `send` on its conversation; the provider answers with the earlier turn's context.
+- [ ] **cancel (FR65):** TaskStop on a running agent-cli agent → its run ends `cancelled` (exit 130).
+- [ ] **hand-off failure (FR64):** an agentcli failure (exit 3, busy) → the answer starts with `agent-cli: the hand-off to the agent failed` and no model request is made.
+- [ ] **progress (FR66):** fake `review-ok` → `agentcli progress <run_id> --json` lists the two commands and the final message in order, `next: 3`; `--from 3` lists none; an unknown run exits 4.
+- [ ] **agent feedback flag (FR68):** `--agent-feedback --session-id s` → `agent_feedback: true` in `request.json` and `status --json`; `AGENTCLI_AGENT_FEEDBACK=1` likewise; with no session id the run exits 0, `agent_feedback: false`, and stderr says it was ignored.
+- [ ] **flagged run shown (FR69):** a hook starts a foreground `exec --agent-feedback` in the session → within one poll a background agent row appears and follows the run; when it ends, Claude receives no notification for it.
+- [ ] **model used (FR70):** a run on the provider's default model records `model: null` and `model_used` equal to the model in the provider's session file; `stats --session-id s --json` counts only that session and lists its tokens under `usage_by_model`.
+
 ## Edge Cases
 
 - [ ] **two prompt sources (FR1):** `agentcli exec --prompt-file p.md "q"` → exit 2 before spawning; the fake was not invoked.
