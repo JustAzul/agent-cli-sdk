@@ -214,8 +214,8 @@ export function progressCommand(bin, runId, from) {
   return [bin, 'progress', runId, '--from', String(from), '--json']
 }
 
-// readProgress reads `progress --json`: the entries and where the next read
-// starts, or null when it is not a progress listing.
+// readProgress reads `progress --json`: the entries, where the next read
+// starts and the run's state, or null when it is not a progress listing.
 export function readProgress(stdout) {
   try {
     const parsed = JSON.parse(stdout)
