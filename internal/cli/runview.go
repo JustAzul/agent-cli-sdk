@@ -104,23 +104,26 @@ func resultOf(s store.State) runResult {
 // run was and when it ran.
 type runView struct {
 	runResult
-	Turn         int     `json:"turn"`
-	Background   bool    `json:"background"`
-	Command      string  `json:"command"`
-	Scenario     string  `json:"scenario"`
-	Source       string  `json:"source"`
-	SessionID    *string `json:"session_id"`
-	AdmittedAt   string  `json:"admitted_at"`
-	StartedAt    *string `json:"started_at"`
-	EndedAt      *string `json:"ended_at"`
-	ErrorExcerpt *string `json:"error_excerpt"`
+	Turn       int     `json:"turn"`
+	Background bool    `json:"background"`
+	Command    string  `json:"command"`
+	Scenario   string  `json:"scenario"`
+	Source     string  `json:"source"`
+	SessionID  *string `json:"session_id"`
+	// AgentFeedback asks the run's Claude Code session to show it as a
+	// background agent; the agent-cli plugin reads it here.
+	AgentFeedback bool    `json:"agent_feedback"`
+	AdmittedAt    string  `json:"admitted_at"`
+	StartedAt     *string `json:"started_at"`
+	EndedAt       *string `json:"ended_at"`
+	ErrorExcerpt  *string `json:"error_excerpt"`
 }
 
 func viewOf(s store.State, req requestRecord) runView {
 	return runView{
 		runResult: resultOf(s), Turn: s.Turn, Background: s.Background,
 		Command: req.Command, Scenario: req.Scenario, Source: req.Source, SessionID: nullable(req.SessionID),
-		AdmittedAt: s.AdmittedAt, StartedAt: s.StartedAt, EndedAt: s.EndedAt, ErrorExcerpt: s.ErrorExcerpt,
+		AgentFeedback: req.AgentFeedback, AdmittedAt: s.AdmittedAt, StartedAt: s.StartedAt, EndedAt: s.EndedAt, ErrorExcerpt: s.ErrorExcerpt,
 	}
 }
 

@@ -28,6 +28,7 @@ type turnFlags struct {
 	json          bool
 	dryRun        bool
 	background    bool
+	agentFeedback bool
 	attrs         attrList
 }
 
@@ -153,6 +154,8 @@ func parseTurnArgs(ctx *Context, spec turnSpec, args []string) (p parsedTurn, ex
 	fs.Var(attrFlag{list: &f.attrs, asJSON: true}, "attr-json", "attribute key=<json> (repeatable)")
 	fs.BoolVar(&f.dryRun, "dry-run", false, "print the provider plan and execute nothing")
 	fs.BoolVar(&f.background, "background", false, "admit the run as a job and return once its worker is running")
+	fs.BoolVar(&f.agentFeedback, "agent-feedback", isOn(ctx.Getenv(agentFeedbackEnv)),
+		"show the run as a background agent in its Claude Code session (needs a session id; default from "+agentFeedbackEnv+")")
 	if spec.extra != nil {
 		spec.extra(fs)
 	}
@@ -172,9 +175,29 @@ func parseTurnArgs(ctx *Context, spec turnSpec, args []string) (p parsedTurn, ex
 		if fs.NArg() == 0 {
 			p.given = map[string]bool{}
 			fs.Visit(func(f *flag.Flag) { p.given[f.Name] = true })
+			requireSessionForFeedback(ctx, f)
 			return p, 0, false
 		}
 		p.positional = append(p.positional, fs.Arg(0))
 		rest = fs.Args()[1:]
 	}
+}
+
+// agentFeedbackEnv turns --agent-feedback on for every turn of a caller that
+// cannot change its arguments; an agentcli that predates the flag ignores it.
+const agentFeedbackEnv = "AGENTCLI_AGENT_FEEDBACK"
+
+func isOn(value string) bool {
+	return value == "1" || strings.EqualFold(value, "true")
+}
+
+// requireSessionForFeedback turns agent feedback off for a run with no session
+// id, which no Claude Code session could show, and says why on stderr. The run
+// itself goes ahead: a display option never fails its caller.
+func requireSessionForFeedback(ctx *Context, f *turnFlags) {
+	if !f.agentFeedback || f.sessionID != "" {
+		return
+	}
+	f.agentFeedback = false
+	fmt.Fprintln(ctx.Stderr, "agentcli: --agent-feedback ignored: no session id (pass --session-id or set CLAUDE_CODE_SESSION_ID)")
 }

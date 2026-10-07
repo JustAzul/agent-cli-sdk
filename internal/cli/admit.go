@@ -38,6 +38,7 @@ type requestRecord struct {
 	Cwd           string         `json:"cwd"`
 	Source        string         `json:"source"`
 	SessionID     string         `json:"session_id"`
+	AgentFeedback bool           `json:"agent_feedback"`
 	TimeoutS      *int           `json:"timeout_s"`
 	CleanSentinel string         `json:"clean_sentinel"`
 	MaterialLabel string         `json:"material_label"`
@@ -93,7 +94,7 @@ func (a admission) request() requestRecord {
 		Model: nullable(e.Model), ModelSource: e.ModelSource,
 		Effort: nullable(e.Effort), EffortSource: e.EffortSource,
 		Sandbox: nullable(e.Sandbox), SandboxSource: e.SandboxSource,
-		Cwd: a.cwd, Source: f.source, SessionID: f.sessionID, TimeoutS: timeoutSeconds(f.timeoutS),
+		Cwd: a.cwd, Source: f.source, SessionID: f.sessionID, AgentFeedback: f.agentFeedback, TimeoutS: timeoutSeconds(f.timeoutS),
 		CleanSentinel: f.cleanSentinel, MaterialLabel: f.materialLabel,
 		Attrs: f.attrs.object(), Passthrough: passthrough, Plan: a.plan,
 	}
