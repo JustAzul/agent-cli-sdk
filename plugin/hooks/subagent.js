@@ -7,8 +7,6 @@ import { RESULT_OUTPUT_BYTES, cutBytes, isTerminal, resultNote } from './lib.js'
 
 export const AGENT_SOURCE = 'agent'
 export const DISPATCH_SKILL = 'dispatch'
-export const GATE_LIMIT = 500
-const GATE_PREFIX = 'agent-gate:'
 export const CONVERSATIONS_KEY = 'agent-conversations'
 export const ADMIT_TIMEOUT_MS = 30000
 export const CONVERSATIONS_LIMIT = 500
@@ -195,24 +193,6 @@ export function readConversations(stored) {
 export function rememberConversation(records, agentId, conversationId) {
   const others = records.filter((entry) => entry.agent_id !== agentId)
   return [...others, { agent_id: agentId, conversation_id: conversationId }].slice(-CONVERSATIONS_LIMIT)
-}
-
-// gateKey is where a session records that its dispatch skill has loaded. One
-// key per session: sessions never write each other's, so none can close
-// another's gate.
-export function gateKey(sessionId) {
-  return GATE_PREFIX + sessionId
-}
-
-export function isGateKey(key) {
-  return typeof key === 'string' && key.startsWith(GATE_PREFIX)
-}
-
-// staleGateKeys picks the gate keys to drop so that the GATE_LIMIT most
-// recently opened remain; `gates` holds each key with the time it was opened.
-export function staleGateKeys(gates) {
-  const newestFirst = [...gates].sort((a, b) => String(b.openedAt).localeCompare(String(a.openedAt)))
-  return newestFirst.slice(GATE_LIMIT).map((gate) => gate.key)
 }
 
 export function conversationOf(records, agentId) {

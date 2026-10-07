@@ -23,11 +23,12 @@ test('starting the session again, as a reload does, does not repeat a notice or 
   expect(w.submits.length).toBe(1)
 
   await $.session.start(START)
-  const before = w.runs.length
+  const polls = () => w.runs.filter((r) => r.argv[1] === 'status').length
+  const before = polls()
   await w.clock.advance(POLL_MS)
 
   expect(w.submits.length).toBe(1)
-  expect(w.runs.length - before).toBe(1) // one poll, not two
+  expect(polls() - before).toBe(1) // one poll, not two
 })
 
 test('the notified set keeps the 500 most recent ids', async ($, on) => {

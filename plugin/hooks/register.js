@@ -43,11 +43,9 @@ import {
   flaggedRuns,
   firstTurnCommand,
   followUpCommand,
-  gateKey,
   handoffFailure,
   hasAnswered,
   heartbeatLine,
-  isGateKey,
   isWaitTimeout,
   progressCommand,
   progressLine,
@@ -56,7 +54,6 @@ import {
   rememberConversation,
   sessionStatsCommand,
   sliceWaitCommand,
-  staleGateKeys,
   statusLine,
   taskIdOf,
   terminalRunIds,
@@ -67,6 +64,10 @@ import {
 
 const COMMAND = 'agent-cli-jobs'
 const NO_TOOLS = 'agent-cli agents run no tools: an agentcli job answers for them.'
+// Set once the dispatch skill has loaded in this session; the agent types are
+// offered to the model only then. Session state is never shared with another
+// session, so no session can close another's gate.
+const DISPATCH_LOADED = { plugin: 'agent-cli', key: 'dispatchLoaded' }
 // A step's response: what the run is doing as thinking, then the answer.
 const THINKING_BLOCK = 0
 const ANSWER_BLOCK = 1
@@ -86,9 +87,16 @@ let timer = null
 let isPolling = false
 let shownStatus = null
 // The terminal runs of the session when its token count was last read, and
-// that count: it is read again only once another run ends.
+// that count. A run's telemetry record lands just after its terminal state, so
+// the count is read when another run ends and once more on the next poll.
 let shownTerminal = ''
 let shownTokens = undefined
+let isTokensRefreshDue = false
+let isTokensFailureLogged = false
+// Runs whose progress could not be read, and runs that could not be shown as
+// agents, each logged once.
+const loggedProgressFailures = new Set()
+const loggedSpawnDenials = new Set()
 // The agent ids this load has resolved: the type name for one of this plugin's
 // agent types, null for any other agent. A reload refills it from $.agent.list().
 const knownTypes = new Map()
@@ -100,7 +108,6 @@ export function register(on) {
   on('session.start', async ($, e, next) => {
     await registerTools($)
     await registerAgentTypes($)
-    await pruneGates($).catch((error) => $.ui.log('could not prune agent gates: ' + messageOf(error), { to: 'debug' }))
     if (timer !== null) timer.cancel()
     timer = $.clock.every(POLL_MS, () => {
       void poll($)
@@ -128,7 +135,7 @@ export function register(on) {
   // The agent types. Every way these hooks can fail ends in an answer that
   // says the hand-off failed, never in a Claude model's answer.
   on('skill.prompt', async ($, e, next) => {
-    if (e.skill === $.plugin.name + ':' + DISPATCH_SKILL) await $.store.set(gateKey(await $.session.id()), new Date().toISOString())
+    if (e.skill === $.plugin.name + ':' + DISPATCH_SKILL) await $.state.set(DISPATCH_LOADED, true)
     return next(e)
   })
 
@@ -304,9 +311,15 @@ async function checkJobs($) {
 }
 
 async function showStatus($, bin, sessionId, running, terminal) {
-  if (terminal !== shownTerminal) {
-    shownTerminal = terminal
-    shownTokens = await sessionTokens($, bin, sessionId)
+  const hasRunEnded = terminal !== shownTerminal
+  if (hasRunEnded || isTokensRefreshDue) {
+    const tokens = await sessionTokens($, bin, sessionId)
+    // A failed read leaves the key, so the next poll reads again.
+    if (tokens !== null) {
+      isTokensRefreshDue = hasRunEnded
+      shownTerminal = terminal
+      shownTokens = tokens
+    }
   }
   const text = statusLine(statusText(running), shownTokens)
   if (text !== shownStatus) {
@@ -315,9 +328,19 @@ async function showStatus($, bin, sessionId, running, terminal) {
   }
 }
 
+// sessionTokens is the status line's token text, undefined when no run
+// reported usage, or null when the count could not be read (logged once).
 async function sessionTokens($, bin, sessionId) {
   const reply = await $.process.run(sessionStatsCommand(bin, sessionId))
-  return reply.exitCode === 0 ? tokensText(reply.stdout) : undefined
+  if (reply.exitCode === 0) {
+    isTokensFailureLogged = false
+    return tokensText(reply.stdout)
+  }
+  if (!isTokensFailureLogged) {
+    isTokensFailureLogged = true
+    $.ui.log('could not read the session token count: ' + failureText(reply), { to: 'debug' })
+  }
+  return null
 }
 
 // attachFlaggedRuns shows each run another caller started with
@@ -331,8 +354,18 @@ async function attachFlaggedRuns($, runs) {
     attached = remember(attached, run.run_id)
     await $.store.set(ATTACHED_KEY, attached)
     const spawned = await $.agent.spawn({ subagentType: $.plugin.name + ':' + ATTACH_TYPE, description: attachDescription(run), prompt: attachPrompt(run.run_id) })
-    if (spawned.agentId) knownTypes.set(spawned.agentId, ATTACH_TYPE)
-    else $.ui.log('could not show run ' + run.run_id + ' as an agent: ' + spawned.deny, { to: 'debug' })
+    if (typeof spawned.deny !== 'string') {
+      if (spawned.agentId) knownTypes.set(spawned.agentId, ATTACH_TYPE)
+      continue
+    }
+
+    // Refused: unmark it, so a later poll tries again while it runs.
+    attached = attached.filter((id) => id !== run.run_id)
+    await $.store.set(ATTACHED_KEY, attached)
+    if (!loggedSpawnDenials.has(run.run_id)) {
+      loggedSpawnDenials.add(run.run_id)
+      $.ui.log('agent-cli could not show run ' + run.run_id + ' as an agent: ' + spawned.deny)
+    }
   }
 }
 
@@ -371,14 +404,7 @@ async function registerAgentTypes($) {
 // The agent types are offered to the model only once the dispatch skill has
 // loaded in this session.
 async function isOfferedHere($) {
-  return (await $.store.get(gateKey(await $.session.id()))) !== undefined
-}
-
-// pruneGates keeps the gate keys of the most recently opened sessions.
-async function pruneGates($) {
-  const keys = (await $.store.keys()).filter(isGateKey)
-  const gates = await Promise.all(keys.map(async (key) => ({ key, openedAt: await $.store.get(key) })))
-  for (const key of staleGateKeys(gates)) await $.store.delete(key)
+  return (await $.state.get(DISPATCH_LOADED)).value === true
 }
 
 // subagentTypeOf returns this plugin's type name for the agent whose loop an
@@ -514,13 +540,25 @@ async function* followRun($, bin, runId, signal) {
   }
 }
 
-// newProgress reads the run's progress entries from `from` on; a read that
-// fails shows nothing new and leaves `from` where it was.
+// newProgress reads the run's progress entries from `from` on. A read that
+// fails shows nothing new, leaves `from` where it was and is logged once per
+// run: the wait goes on, and the answer does not depend on progress.
 async function newProgress($, bin, runId, from) {
-  const reply = await $.process.run(progressCommand(bin, runId, from))
-  const progress = reply.exitCode === 0 ? readProgress(reply.stdout) : null
-  if (progress === null) return { next: from, text: [] }
-  return { next: progress.next, text: progress.entries.map(progressLine) }
+  let failure
+  try {
+    const reply = await $.process.run(progressCommand(bin, runId, from))
+    const progress = reply.exitCode === 0 ? readProgress(reply.stdout) : null
+    if (progress !== null) return { next: progress.next, text: progress.entries.map(progressLine) }
+    failure = failureText(reply)
+  } catch (error) {
+    failure = messageOf(error)
+  }
+
+  if (!loggedProgressFailures.has(runId)) {
+    loggedProgressFailures.add(runId)
+    $.ui.log('could not read the progress of run ' + runId + ': ' + failure, { to: 'debug' })
+  }
+  return { next: from, text: [] }
 }
 
 async function finalAnswer($, bin, runId) {

@@ -121,7 +121,7 @@ test('the hidden agent type is never offered to the model, gate open or not', as
   expect(w.agentTypes.find((t) => t.name === 'run')).toMatchObject({ background: true })
 })
 
-test("the status line adds the session's Codex tokens, read again only when a run ends", async ($, on) => {
+test("the status line adds the session's Codex tokens, read again when a run ends", async ($, on) => {
   const w = world(on)
   let runs: any[] = [job({ run_id: 'a', state: 'done', outcome: 'ok', source: 'hook-stop' }), job({ run_id: 'b', state: 'running' })]
   let tokens = { input_tokens: 1408204, output_tokens: 7156, runs_with_usage: 1 }
@@ -136,8 +136,12 @@ test("the status line adds the session's Codex tokens, read again only when a ru
   const stats = w.runs.find((r) => r.argv[1] === 'stats')!
   expect(stats.argv.slice(1)).toEqual(['stats', '--session-id', SESSION, '--all', '--json'])
 
+  // Read once more on the next poll, in case the run's record landed late;
+  // then not again until another run ends.
   await w.clock.advance(POLL_MS)
-  expect(w.runs.filter((r) => r.argv[1] === 'stats').length).toBe(1)
+  expect(w.runs.filter((r) => r.argv[1] === 'stats').length).toBe(2)
+  await w.clock.advance(POLL_MS)
+  expect(w.runs.filter((r) => r.argv[1] === 'stats').length).toBe(2)
 
   runs = [job({ run_id: 'a', state: 'done', outcome: 'ok', source: 'hook-stop' }), job({ run_id: 'b', state: 'done', outcome: 'ok' })]
   tokens = { input_tokens: 2500000, output_tokens: 9000, runs_with_usage: 2 }
@@ -147,6 +151,61 @@ test("the status line adds the session's Codex tokens, read again only when a ru
     return listing(...runs)
   }
   await w.clock.advance(POLL_MS)
-  expect(w.runs.filter((r) => r.argv[1] === 'stats').length).toBe(2)
+  expect(w.runs.filter((r) => r.argv[1] === 'stats').length).toBe(3)
   expect(w.statuses.at(-1)).toBe('Codex 2.5M in · 9k out')
+})
+
+test('a refused spawn is retried on a later poll and logged once', async ($, on) => {
+  const w = world(on)
+  let refusals = 2
+  w.spawnAnswer = () => (refusals-- > 0 ? { deny: 'background agents are disabled' } : { model: 'claude-haiku-4-5', agentId: 'ag-late' })
+  w.respond = () => listing(job({ run_id: 'run-h', state: 'running', source: 'hook-stop', background: false, agent_feedback: true }))
+  await $.session.start(START)
+
+  await w.clock.advance(POLL_MS * 4)
+
+  expect(w.spawns.length).toBe(3)
+  expect(w.logs.filter((l) => l.includes('could not show run run-h')).length).toBe(1)
+  expect(w.store.get('agent-attached')).toEqual(['run-h'])
+})
+
+test('a token count that cannot be read is read again on the next poll', async ($, on) => {
+  const w = world(on)
+  let fails = true
+  w.respond = (argv) => {
+    if (argv[1] === 'stats') return fails ? { exitCode: 70, stdout: '', stderr: 'agentcli: telemetry locked' } : ok(JSON.stringify({ usage_totals: { input_tokens: 2000, output_tokens: 10, runs_with_usage: 1 } }))
+    if (argv[1] === 'result') return ok('')
+    return listing(job({ run_id: 'a', state: 'done', outcome: 'ok', source: 'hook-stop' }))
+  }
+  await $.session.start(START)
+
+  await w.clock.advance(POLL_MS)
+  fails = false
+  await w.clock.advance(POLL_MS)
+
+  expect(w.statuses.at(-1)).toBe('Codex 2k in · 10 out')
+  expect(w.logs.filter((l) => l.includes('token count')).length).toBe(1)
+})
+
+test('a progress read that fails leaves the run followed to its answer', async ($, on) => {
+  const w = world(on)
+  let waits = 0
+  w.respond = (argv) => {
+    if (argv[1] === 'exec') return ok(JSON.stringify({ conversation_id: 'conv-1', run_id: 'run-1' }))
+    if (argv[1] === 'wait') return ++waits < 3 ? WAIT_TIMEOUT : finishedRun()
+    if (argv[1] === 'progress') throw new Error('progress unavailable')
+    if (argv[1] === 'status') return finishedRun()
+    return ok('Codex answered anyway.')
+  }
+  w.agents.push({ id: 'ag-1', type: 'agent-cli:adhoc' })
+  w.messages['ag-1'] = [{ role: 'user', text: 'q' }]
+  await $.session.start(START)
+
+  const out = await step($, 'ag-1')
+
+  expect(waits).toBe(3)
+  expect(out.text).toContain('Codex answered anyway.')
+  expect(out.text).not.toContain('hand-off to the agent failed')
+  expect(w.runs.some((r) => r.argv[1] === 'cancel')).toBe(false)
+  expect(w.logs.filter((l) => l.includes('could not read the progress of run run-1')).length).toBe(1)
 })

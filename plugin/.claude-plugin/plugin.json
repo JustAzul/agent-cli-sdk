@@ -6,5 +6,6 @@
   },
   "license": "MIT",
   "homepage": "https://github.com/JustAzul/agent-cli-sdk",
-  "repository": "https://github.com/JustAzul/agent-cli-sdk"
+  "repository": "https://github.com/JustAzul/agent-cli-sdk",
+  "types": "./types/index.d.ts"
 }
