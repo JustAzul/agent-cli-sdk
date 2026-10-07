@@ -8,9 +8,9 @@ import { RESULT_OUTPUT_BYTES, cutBytes, resultNote } from './lib.js'
 export const AGENT_SOURCE = 'agent'
 export const DISPATCH_SKILL = 'dispatch'
 export const GATE_KEY = 'agent-gate'
+export const GATE_LIMIT = 500
 export const CONVERSATIONS_KEY = 'agent-conversations'
 export const WAIT_SECONDS = 540
-export const WAIT_STILL_RUNNING = 5
 export const WAIT_TIMEOUT_MS = 590000
 export const ADMIT_TIMEOUT_MS = 30000
 export const CONVERSATIONS_LIMIT = 500
@@ -129,6 +129,16 @@ export function waitCommand(bin, runId) {
   return [bin, 'wait', runId, '--timeout', String(WAIT_SECONDS), '--json']
 }
 
+// isWaitTimeout tells a wait that gave up while the run goes on from a run
+// that ended: `wait` exits with the run's own exit code, which can be 5 too.
+export function isWaitTimeout(reply) {
+  try {
+    return JSON.parse(reply.stdout).sdk_status === 'wait_timeout'
+  } catch {
+    return false
+  }
+}
+
 // finishedRun reads `status <run_id> --json`, or null when it is not a run.
 export function finishedRun(stdout) {
   try {
@@ -191,6 +201,22 @@ export function readConversations(stored) {
 export function rememberConversation(records, agentId, conversationId) {
   const others = records.filter((entry) => entry.agent_id !== agentId)
   return [...others, { agent_id: agentId, conversation_id: conversationId }].slice(-CONVERSATIONS_LIMIT)
+}
+
+// openGate adds a session to the persisted set of sessions whose dispatch
+// skill has loaded, keeping the most recent GATE_LIMIT. The set is shared by
+// every session, so one session opening its gate never closes another's.
+export function openGate(stored, sessionId) {
+  const others = readSessions(stored).filter((id) => id !== sessionId)
+  return [...others, sessionId].slice(-GATE_LIMIT)
+}
+
+export function isGateOpen(stored, sessionId) {
+  return readSessions(stored).includes(sessionId)
+}
+
+function readSessions(stored) {
+  return Array.isArray(stored) ? stored.filter((id) => typeof id === 'string') : []
 }
 
 export function conversationOf(records, agentId) {

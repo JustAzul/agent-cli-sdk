@@ -47,6 +47,7 @@ export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
     commands: [] as any[],
     store: new Map<string, unknown>(Object.entries(opts.store ?? {})),
     storeWrites: [] as { key: string; value: unknown }[],
+    sessionId: SESSION,
     refuseCommand: false,
     respond: ((argv: string[]) => {
       throw new Error('unexpected agentcli call: ' + argv.join(' '))
@@ -59,7 +60,7 @@ export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
     modelSteps: [] as (string | undefined)[],
   }
   on('session.start', () => ({ cwd: '/work' }))
-  on('session.id', () => ({ value: SESSION }))
+  on('session.id', () => ({ value: w.sessionId }))
   on('tool.register', (_$: any, e: any) => {
     w.tools.push(e)
     return { value: { tool: 'mcp__agent-cli__' + e.name } }

@@ -27,7 +27,6 @@ import {
   DISPATCH_SKILL,
   GATE_KEY,
   LOST_CONVERSATION,
-  WAIT_STILL_RUNNING,
   WAIT_TIMEOUT_MS,
   agentSpecs,
   answerText,
@@ -37,6 +36,9 @@ import {
   followUpCommand,
   handoffFailure,
   hasAnswered,
+  isGateOpen,
+  isWaitTimeout,
+  openGate,
   readConversations,
   rememberConversation,
   turnPrompt,
@@ -99,13 +101,13 @@ export function register(on) {
   // The agent types. Every way these hooks can fail ends in an answer that
   // says the hand-off failed, never in a Claude model's answer.
   on('skill.prompt', async ($, e, next) => {
-    if (e.skill === $.plugin.name + ':' + DISPATCH_SKILL) await $.store.set(GATE_KEY, await $.session.id())
+    if (e.skill === $.plugin.name + ':' + DISPATCH_SKILL) await $.store.set(GATE_KEY, openGate(await $.store.get(GATE_KEY), await $.session.id()))
     return next(e)
   })
 
   on('agent.offer', async ($, e, next) => {
     if (typeOf($.plugin.name, e.agent) === null) return next(e)
-    return (await isGateOpen($)) ? next(e) : { isOffered: false }
+    return (await isOfferedHere($)) ? next(e) : { isOffered: false }
   }).catch(($, e, next) => (next.called || typeOf($.plugin.name, e.agent) === null ? next(e) : { isOffered: false }))
 
   on('turn.step', async function* ($, e, next) {
@@ -298,8 +300,8 @@ async function registerAgentTypes($) {
 
 // The agent types are offered to the model only once the dispatch skill has
 // loaded in this session.
-async function isGateOpen($) {
-  return (await $.store.get(GATE_KEY)) === (await $.session.id())
+async function isOfferedHere($) {
+  return isGateOpen(await $.store.get(GATE_KEY), await $.session.id())
 }
 
 // subagentTypeOf returns this plugin's type name for the agent whose loop an
@@ -406,7 +408,7 @@ async function waitForRun($, bin, runId, signal) {
   let reply
   do {
     reply = await $.process.run(waitCommand(bin, runId), { timeoutMs: WAIT_TIMEOUT_MS })
-  } while (reply.exitCode === WAIT_STILL_RUNNING && !signal.aborted)
+  } while (isWaitTimeout(reply) && !signal.aborted)
 }
 
 async function finalAnswer($, bin, runId) {
@@ -416,7 +418,8 @@ async function finalAnswer($, bin, runId) {
   if (!isTerminal(run.state)) return handoffFailure('run ' + runId + ' is still ' + run.state + '; read it later with the agent-cli jobs tool.')
 
   const output = await $.process.run([bin, 'result', runId])
-  return answerText(run, output.exitCode === 0 ? output.stdout : '')
+  if (output.exitCode !== 0) return handoffFailure('could not read the output of run ' + runId + '. ' + failureText(output))
+  return answerText(run, output.stdout)
 }
 
 // failureOf names why a hook failed, from the engine's HookFailure.

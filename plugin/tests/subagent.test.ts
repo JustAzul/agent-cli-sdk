@@ -215,7 +215,7 @@ test('a long run is waited for in slices until it finishes', async ($, on) => {
   w.respond = (argv) => {
     if (argv[1] !== 'wait') return answers(argv)
     waits += 1
-    return waits < 3 ? { exitCode: 5, stdout: '', stderr: 'still running' } : finished()
+    return waits < 3 ? { exitCode: 5, stdout: JSON.stringify({ sdk_status: 'wait_timeout', exit_code: 5, error: 'run run-1 is still running after 9m0s' }), stderr: '' } : finished()
   }
   subagent(w, 'ag-1', 'agent-cli:adhoc', [{ role: 'user', text: 'slow one' }])
   await $.session.start(START)
@@ -286,4 +286,45 @@ test('tool calls made inside an agent-cli subagent are refused', async ($, on) =
   expect(inside.deny).toContain('agent-cli agents run no tools')
   expect(other.result).toBe('unanswered')
   expect(main.result).toBe('unanswered')
+})
+
+test('a run that ended with exit code 5 is not waited for again', async ($, on) => {
+  const w = world(on)
+  const answers = codex('', { state: 'failed', outcome: 'error', error_excerpt: 'provider exited 5' })
+  w.respond = (argv) => (argv[1] === 'wait' ? { ...finished({ state: 'failed', outcome: 'error' }), exitCode: 5 } : answers(argv))
+  subagent(w, 'ag-1', 'agent-cli:adhoc', [{ role: 'user', text: 'q' }])
+  await $.session.start(START)
+
+  const out = await step($, 'ag-1')
+
+  expect(w.runs.filter((r) => r.argv[1] === 'wait').length).toBe(1)
+  expect(out.text.startsWith('agentcli run run-1 ended error: provider exited 5')).toBe(true)
+})
+
+test('an output that cannot be read is a hand-off failure, not an empty answer', async ($, on) => {
+  const w = world(on)
+  const answers = codex('')
+  w.respond = (argv) => (argv[1] === 'result' ? { exitCode: 70, stdout: '', stderr: 'agentcli: reading output: permission denied\n' } : answers(argv))
+  subagent(w, 'ag-1', 'agent-cli:adhoc', [{ role: 'user', text: 'q' }])
+  await $.session.start(START)
+
+  const out = await step($, 'ag-1')
+
+  expect(out.text.startsWith(HANDOFF_FAILED)).toBe(true)
+  expect(out.text).toContain('permission denied')
+  expect(out.text).not.toContain('produced no output')
+})
+
+test('another session loading the dispatch skill does not close this session', async ($, on) => {
+  const w = world(on)
+  await $.session.start(START)
+  const offer = () => $.agent.offer({ agent: 'agent-cli:adhoc', description: '', source: 'plugin', provider: { plugin: 'agent-cli', tier: 'user' } } as any)
+
+  await $.skill.prompt({ skill: 'agent-cli:dispatch', text: '' })
+  w.sessionId = 'sess-2'
+  expect(await offer()).toEqual({ isOffered: false })
+  await $.skill.prompt({ skill: 'agent-cli:dispatch', text: '' })
+  w.sessionId = SESSION
+
+  expect(await offer()).toEqual({ isOffered: true })
 })
