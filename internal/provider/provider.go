@@ -124,9 +124,10 @@ type Progress struct {
 
 // ModelReporter is a provider that can tell, once a run is over, which model
 // and effort it actually ran with, from its own records. The runner records
-// them beside the requested ones; "" means it could not tell.
+// them beside the requested ones. "" with a nil error means there is no
+// record to read; an error means one could not be read.
 type ModelReporter interface {
-	UsedModel(env []string, sessionID string) (model, effort string)
+	UsedModel(env []string, sessionID string) (model, effort string, err error)
 }
 
 // Provider adapts one agent CLI.

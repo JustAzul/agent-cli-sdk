@@ -435,21 +435,25 @@ func (j *Job) appendTelemetry(st store.State, label, excerpt string, o outcome) 
 	rec.ErrorExcerpt = nullable(excerpt)
 	rec.Usage = provider.NormalizeUsage(rec.Command, o.usage)
 	rec.ProviderSessionID = nullable(o.sessionID)
-	rec.ModelUsed, rec.EffortUsed = j.usedModel(o.sessionID)
+	rec.ModelUsed, rec.EffortUsed = nullable(o.modelUsed), nullable(o.effortUsed)
 	if err := telemetry.Append(j.Store.Home, rec, j.Now(), telemetry.Options{}); err != nil {
 		j.Warn(fmt.Sprintf("could not append the telemetry record: %v", err))
 	}
 }
 
 // usedModel asks the provider which model and effort the run actually used,
-// when it can tell.
-func (j *Job) usedModel(sessionID string) (model, effort *string) {
+// when it can tell. It must run while the run still owns its conversation: a
+// next turn of the same provider session records its own model after it.
+func (j *Job) usedModel(sessionID string) (model, effort string) {
 	reporter, ok := j.Provider.(provider.ModelReporter)
 	if !ok || sessionID == "" {
-		return nil, nil
+		return "", ""
 	}
-	m, e := reporter.UsedModel(j.Env, sessionID)
-	return nullable(m), nullable(e)
+	model, effort, err := reporter.UsedModel(j.Env, sessionID)
+	if err != nil {
+		j.Warn(fmt.Sprintf("could not read the model the provider used: %v", err))
+	}
+	return model, effort
 }
 
 func (j *Job) stamp() string { return j.Now().UTC().Format(time.RFC3339) }
@@ -556,6 +560,8 @@ type outcome struct {
 	eventError   string
 	stderrLine   string
 	sessionID    string
+	modelUsed    string // what the provider reports it ran with; "" when unknown
+	effortUsed   string
 }
 
 // finish classifies the run and finalizes it in this order: output final,
@@ -580,6 +586,7 @@ func (j *Job) finish(st store.State, o outcome) Result {
 		}
 	}
 
+	o.modelUsed, o.effortUsed = j.usedModel(o.sessionID)
 	ended := j.stamp()
 	exit := o.exitCode
 	st.State = state
