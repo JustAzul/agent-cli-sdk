@@ -51,6 +51,12 @@ export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
     respond: ((argv: string[]) => {
       throw new Error('unexpected agentcli call: ' + argv.join(' '))
     }) as Responder,
+    agentTypes: [] as any[],
+    agents: [] as { id: string; type: string }[],
+    messages: {} as Record<string, { role: 'user' | 'assistant'; text: string }[]>,
+    // The agent id of every model request that reached the model beneath the
+    // plugin; undefined for the main loop.
+    modelSteps: [] as (string | undefined)[],
   }
   on('session.start', () => ({ cwd: '/work' }))
   on('session.id', () => ({ value: SESSION }))
@@ -94,9 +100,42 @@ export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
     w.runs.push({ argv: [...e.argv], stdin: e.init?.stdin, cwd: e.init?.cwd })
     return { value: await w.respond([...e.argv], e.init ?? {}) }
   })
+  on('agent.register', (_$: any, e: any) => {
+    w.agentTypes.push(e)
+    return { value: { agent: 'agent-cli:' + e.name } }
+  })
+  on('agent.list', () => ({ value: w.agents.map((a) => ({ ...a, description: '', status: 'running' })) }))
+  on('agent.offer', () => ({ isOffered: true }))
+  on('skill.prompt', (_$: any, e: any) => ({ text: e.text }))
+  on('session.messages', (_$: any, e: any) => {
+    const rows = w.messages[e.agentId]
+    return { value: rows ?? { deny: 'no agent ' + e.agentId } }
+  })
+  on('turn.step', async function* (_$: any, e: any) {
+    w.modelSteps.push(e.agentId)
+    yield { kind: 'text', index: 0, text: 'a Claude model answered' }
+    yield { kind: 'stop', stopReason: 'end_turn', usage: null }
+    return { turnId: e.turnId, index: e.index, answer: 'a Claude model answered', toolUses: [], stopReason: 'end_turn', usage: null }
+  })
   // Anything the mod does not answer itself falls through to here.
   on('tool.call', () => ({ result: 'unanswered' }))
   return w
+}
+
+// step raises one model request in the loop of `agentId` (the main loop when
+// undefined) and reads the whole response.
+export async function step($: any, agentId?: string) {
+  const stream = $.turn.step({ turnId: 'turn-1', index: 0, model: 'claude-haiku-4-5', messageCount: 1, agentId })
+  const chunks: any[] = []
+  // Read by hand: the step's result is the stream's return value, which a
+  // for-await loop drops.
+  let next = await stream.next()
+  while (!next.done) {
+    chunks.push(next.value)
+    next = await stream.next()
+  }
+  const text = chunks.filter((c) => c.kind === 'text').map((c) => c.text).join('')
+  return { chunks, result: next.value, text }
 }
 
 export const POLL_MS = 15000
