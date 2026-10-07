@@ -25,6 +25,7 @@ function codex(output: string, over: Record<string, unknown> = {}) {
     if (command === 'wait') return finished(over)
     if (command === 'status') return finished(over)
     if (command === 'result') return ok(output)
+    if (command === 'progress') return ok(JSON.stringify({ run_id: 'run-1', state: 'done', next: Number(argv[4]), entries: [] }))
     throw new Error('unexpected agentcli call: ' + argv.join(' '))
   }
 }
@@ -38,8 +39,8 @@ test('the mod registers one background agent type per scenario, only for when th
   const w = world(on)
   await $.session.start(START)
 
-  expect(w.agentTypes.map((t) => t.name).sort()).toEqual(TYPES)
-  for (const spec of w.agentTypes) {
+  expect(w.agentTypes.map((t) => t.name).sort()).toEqual([...TYPES, 'run'].sort())
+  for (const spec of w.agentTypes.filter((t) => t.name !== 'run')) {
     expect(spec.background).toBe(true)
     expect(spec.description).toContain('Use only when the user asks')
     // If the hook ever fails to answer, the stand-in model is the cheapest one
@@ -80,7 +81,7 @@ test('a subagent of an agent type is answered by an agentcli job, never by the m
   expect(admit.argv.slice(1)).toEqual(['exec', '--scenario', 'second-opinion', ...JOB_FLAGS, '-'])
   // The prompt travels on standard input, never inside an argument.
   expect(admit.stdin).toBe('Is a TTL cache safe here?')
-  expect(w.runs.map((r) => r.argv[1])).toEqual(['exec', 'wait', 'status', 'result'])
+  expect(w.runs.map((r) => r.argv[1])).toEqual(['exec', 'wait', 'progress', 'status', 'result'])
   expect(out.text).toContain('Codex says the cache is safe.')
   expect(out.text).toContain('[agentcli run run-1 · conversation conv-1 · ok]')
   expect(out.result.answer).toBe(out.text)
@@ -208,7 +209,7 @@ test('an agentcli failure becomes an answer that says the hand-off failed', asyn
   expect(w.modelSteps).toEqual([])
 })
 
-test('a long run is waited for in slices until it finishes', async ($, on) => {
+test('a run is waited for in short slices until it finishes', async ($, on) => {
   const w = world(on)
   const answers = codex('late answer')
   let waits = 0
@@ -223,7 +224,7 @@ test('a long run is waited for in slices until it finishes', async ($, on) => {
   const out = await step($, 'ag-1')
 
   expect(waits).toBe(3)
-  expect(w.runs.find((r) => r.argv[1] === 'wait')!.argv.slice(1)).toEqual(['wait', 'run-1', '--timeout', '540', '--json'])
+  expect(w.runs.find((r) => r.argv[1] === 'wait')!.argv.slice(1)).toEqual(['wait', 'run-1', '--timeout', '5', '--json'])
   expect(out.text).toContain('late answer')
 })
 

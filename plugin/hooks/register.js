@@ -26,28 +26,50 @@ import {
   CONVERSATIONS_KEY,
   DISPATCH_SKILL,
   LOST_CONVERSATION,
-  WAIT_TIMEOUT_MS,
+  ATTACHED_KEY,
+  ATTACH_TYPE,
+  HEARTBEAT_MS,
+  SLICE_TIMEOUT_MS,
   agentSpecs,
   answerText,
+  attachAnswer,
+  attachDescription,
+  attachPrompt,
+  attachSpec,
+  attachedRunId,
   conversationOf,
+  droppedNoticeText,
   finishedRun,
+  flaggedRuns,
   firstTurnCommand,
   followUpCommand,
   gateKey,
   handoffFailure,
   hasAnswered,
+  heartbeatLine,
   isGateKey,
   isWaitTimeout,
+  progressCommand,
+  progressLine,
   readConversations,
+  readProgress,
   rememberConversation,
+  sessionStatsCommand,
+  sliceWaitCommand,
   staleGateKeys,
+  statusLine,
+  taskIdOf,
+  terminalRunIds,
+  tokensText,
   turnPrompt,
   typeOf,
-  waitCommand,
 } from './subagent.js'
 
 const COMMAND = 'agent-cli-jobs'
 const NO_TOOLS = 'agent-cli agents run no tools: an agentcli job answers for them.'
+// A step's response: what the run is doing as thinking, then the answer.
+const THINKING_BLOCK = 0
+const ANSWER_BLOCK = 1
 
 const TURN_PROPERTIES = {
   provider: { type: 'string', description: 'Provider to run (default: codex).' },
@@ -63,6 +85,10 @@ const TURN_PROPERTIES = {
 let timer = null
 let isPolling = false
 let shownStatus = null
+// The terminal runs of the session when its token count was last read, and
+// that count: it is read again only once another run ends.
+let shownTerminal = ''
+let shownTokens = undefined
 // The agent ids this load has resolved: the type name for one of this plugin's
 // agent types, null for any other agent. A reload refills it from $.agent.list().
 const knownTypes = new Map()
@@ -107,14 +133,17 @@ export function register(on) {
   })
 
   on('agent.offer', async ($, e, next) => {
-    if (typeOf($.plugin.name, e.agent) === null) return next(e)
+    const type = typeOf($.plugin.name, e.agent)
+    if (type === null) return next(e)
+    if (type === ATTACH_TYPE) return { isOffered: false }
     return (await isOfferedHere($)) ? next(e) : { isOffered: false }
   }).catch(($, e, next) => (next.called || typeOf($.plugin.name, e.agent) === null ? next(e) : { isOffered: false }))
 
   on('turn.step', async function* ($, e, next) {
     const type = await subagentTypeOf($, e.agentId)
     if (type === null) return yield* next(e)
-    return yield* answer(e, await answerTurn($, e.agentId, type, next.signal))
+    yield thinking('agentcli · ' + type)
+    return yield* answer(e, yield* followTurn($, e.agentId, type, next.signal))
   }).catch(async function* ($, e, next) {
     if (next.called || !isKnownSubagent(e.agentId)) return yield* next(e)
     return yield* answer(e, handoffFailure('the plugin hook failed: ' + failureOf(next.error)))
@@ -124,6 +153,16 @@ export function register(on) {
     if ((await subagentTypeOf($, e.agentId)) === null) return next(e)
     return { deny: NO_TOOLS }
   }).catch(($, e, next) => (next.called || !isKnownSubagent(e.agentId) ? next(e) : { deny: NO_TOOLS }))
+
+  // A run shown as an agent belongs to whoever started it, who delivers its
+  // result: its agent's completion notice is shown to the person and never
+  // handed to Claude.
+  on('prompt.submit', async ($, e, next) => {
+    if (e.origin?.kind !== 'task-notification') return next(e)
+    const agentId = taskIdOf(e.text)
+    if (agentId === null || (await subagentTypeOf($, agentId)) !== ATTACH_TYPE) return next(e)
+    return { drop: droppedNoticeText(e.text) }
+  }).catch(($, e, next) => next(e))
 }
 
 async function registerTools($) {
@@ -248,11 +287,8 @@ async function checkJobs($) {
   if (reply.exitCode !== 0) return
   const jobs = modJobs(sessionJobs(reply.stdout))
 
-  const text = statusText(runningCount(jobs))
-  if (text !== shownStatus) {
-    shownStatus = text
-    $.ui.status(text)
-  }
+  await attachFlaggedRuns($, flaggedRuns(reply.stdout))
+  await showStatus($, bin, sessionId, runningCount(jobs), terminalRunIds(reply.stdout))
 
   let notified = readNotified(await $.store.get(NOTIFIED_KEY))
   for (const job of oldestFirst(jobs)) {
@@ -264,6 +300,39 @@ async function checkJobs($) {
     const output = await readOutput($, bin, job.run_id)
     $.ui.toast(toastText(job))
     $.prompt.submit({ text: noticeText(job, output) }).catch(() => {})
+  }
+}
+
+async function showStatus($, bin, sessionId, running, terminal) {
+  if (terminal !== shownTerminal) {
+    shownTerminal = terminal
+    shownTokens = await sessionTokens($, bin, sessionId)
+  }
+  const text = statusLine(statusText(running), shownTokens)
+  if (text !== shownStatus) {
+    shownStatus = text
+    $.ui.status(text)
+  }
+}
+
+async function sessionTokens($, bin, sessionId) {
+  const reply = await $.process.run(sessionStatsCommand(bin, sessionId))
+  return reply.exitCode === 0 ? tokensText(reply.stdout) : undefined
+}
+
+// attachFlaggedRuns shows each run another caller started with
+// --agent-feedback as a background agent of this session, once.
+async function attachFlaggedRuns($, runs) {
+  if (runs.length === 0) return
+  let attached = readNotified(await $.store.get(ATTACHED_KEY))
+  for (const run of runs) {
+    if (attached.includes(run.run_id)) continue
+    // Recorded first, so a failure while spawning never shows the run twice.
+    attached = remember(attached, run.run_id)
+    await $.store.set(ATTACHED_KEY, attached)
+    const spawned = await $.agent.spawn({ subagentType: $.plugin.name + ':' + ATTACH_TYPE, description: attachDescription(run), prompt: attachPrompt(run.run_id) })
+    if (spawned.agentId) knownTypes.set(spawned.agentId, ATTACH_TYPE)
+    else $.ui.log('could not show run ' + run.run_id + ' as an agent: ' + spawned.deny, { to: 'debug' })
   }
 }
 
@@ -289,7 +358,7 @@ async function outputPathOf($, bin, runId) {
 }
 
 async function registerAgentTypes($) {
-  for (const spec of agentSpecs()) {
+  for (const spec of [...agentSpecs(), attachSpec()]) {
     try {
       await $.agent.register(spec)
     } catch (error) {
@@ -330,22 +399,41 @@ function isKnownSubagent(agentId) {
   return agentId !== undefined && typeof knownTypes.get(agentId) === 'string'
 }
 
-// answer streams one text block and ends the step, as a model's reply would.
+function thinking(line) {
+  return { kind: 'thinking', index: THINKING_BLOCK, text: line + '\n' }
+}
+
+// answer streams the answer block and ends the step, as a model's reply would.
 async function* answer(e, text) {
-  yield { kind: 'text', index: 0, text }
+  yield { kind: 'text', index: ANSWER_BLOCK, text }
   yield { kind: 'stop', stopReason: 'end_turn', usage: null }
   return { turnId: e.turnId, index: e.index, answer: text, toolUses: [], stopReason: 'end_turn', usage: null }
 }
 
-async function answerTurn($, agentId, type, signal) {
+// followTurn shows the turn's run as it works and returns the answer.
+async function* followTurn($, agentId, type, signal) {
   try {
-    return await runSubagentTurn($, agentId, type, signal)
+    if (type === ATTACH_TYPE) return yield* followAttached($, agentId, signal)
+    return yield* runSubagentTurn($, agentId, type, signal)
   } catch (error) {
     return handoffFailure(messageOf(error))
   }
 }
 
-async function runSubagentTurn($, agentId, type, signal) {
+// followAttached shows a run another caller started and answers one line.
+async function* followAttached($, agentId, signal) {
+  const rows = await $.session.messages({ agentId })
+  const runId = Array.isArray(rows) ? attachedRunId(turnPrompt(rows)) : null
+  if (runId === null) return handoffFailure('this agent names no run to show.')
+
+  const bin = shimPath($.plugin.root)
+  yield* followRun($, bin, runId, signal)
+  const status = await $.process.run([bin, 'status', runId, '--json'])
+  const run = status.exitCode === 0 ? finishedRun(status.stdout) : null
+  return run === null ? handoffFailure('could not read run ' + runId + '. ' + failureText(status)) : attachAnswer(run)
+}
+
+async function* runSubagentTurn($, agentId, type, signal) {
   const rows = await $.session.messages({ agentId })
   if (!Array.isArray(rows)) return handoffFailure('could not read the prompt: ' + rows.deny)
 
@@ -359,7 +447,8 @@ async function runSubagentTurn($, agentId, type, signal) {
   if (ids === null) return handoffFailure('agentcli printed an unexpected admission result: ' + reply.stdout.trim().slice(0, 500))
 
   await recordConversation($, agentId, ids.conversation_id)
-  return collectRun($, bin, ids.run_id, signal)
+  yield* followRun($, bin, ids.run_id, signal)
+  return finalAnswer($, bin, ids.run_id)
 }
 
 // subagentCommand starts the conversation on the agent's first turn and
@@ -388,35 +477,50 @@ async function recordConversation($, agentId, conversationId) {
   }
 }
 
-// collectRun waits for the run and answers with it. An interrupted turn (Esc,
-// or TaskStop on the agent) cancels the run, including one interrupted before
-// the wait began.
-async function collectRun($, bin, runId, signal) {
+// followRun waits for the run in short slices and, after each, streams what
+// the provider did since the last as thinking, or a heartbeat when it has been
+// quiet. An interrupted turn (Esc, or TaskStop on the agent) cancels the run,
+// including one interrupted before the wait began.
+async function* followRun($, bin, runId, signal) {
   const cancel = () => {
     $.process.run([bin, 'cancel', runId]).catch(() => {})
   }
   if (signal.aborted) {
     cancel()
-    return handoffFailure('the turn was interrupted, so run ' + runId + ' was cancelled.')
+    return
   }
 
   signal.addEventListener('abort', cancel, { once: true })
   try {
-    await waitForRun($, bin, runId, signal)
+    const startedAt = await $.clock.now()
+    let shownAt = startedAt
+    let from = 0
+    let reply
+    do {
+      reply = await $.process.run(sliceWaitCommand(bin, runId), { timeoutMs: SLICE_TIMEOUT_MS })
+      const lines = await newProgress($, bin, runId, from)
+      from = lines.next
+      for (const line of lines.text) yield thinking(line)
+
+      const now = await $.clock.now()
+      if (lines.text.length > 0) shownAt = now
+      else if (now - shownAt >= HEARTBEAT_MS) {
+        yield thinking(heartbeatLine(now - startedAt))
+        shownAt = now
+      }
+    } while (isWaitTimeout(reply) && !signal.aborted)
   } finally {
     signal.removeEventListener('abort', cancel)
   }
-
-  return finalAnswer($, bin, runId)
 }
 
-// waitForRun waits in slices, each under $.process.run's ten-minute bound,
-// until the run is no longer running or the turn is interrupted.
-async function waitForRun($, bin, runId, signal) {
-  let reply
-  do {
-    reply = await $.process.run(waitCommand(bin, runId), { timeoutMs: WAIT_TIMEOUT_MS })
-  } while (isWaitTimeout(reply) && !signal.aborted)
+// newProgress reads the run's progress entries from `from` on; a read that
+// fails shows nothing new and leaves `from` where it was.
+async function newProgress($, bin, runId, from) {
+  const reply = await $.process.run(progressCommand(bin, runId, from))
+  const progress = reply.exitCode === 0 ? readProgress(reply.stdout) : null
+  if (progress === null) return { next: from, text: [] }
+  return { next: progress.next, text: progress.entries.map(progressLine) }
 }
 
 async function finalAnswer($, bin, runId) {

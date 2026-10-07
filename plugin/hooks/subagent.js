@@ -3,15 +3,13 @@
 // model. Nothing here touches the mods API, so these functions can be read and
 // tested on their own.
 
-import { RESULT_OUTPUT_BYTES, cutBytes, resultNote } from './lib.js'
+import { RESULT_OUTPUT_BYTES, cutBytes, isTerminal, resultNote } from './lib.js'
 
 export const AGENT_SOURCE = 'agent'
 export const DISPATCH_SKILL = 'dispatch'
 export const GATE_LIMIT = 500
 const GATE_PREFIX = 'agent-gate:'
 export const CONVERSATIONS_KEY = 'agent-conversations'
-export const WAIT_SECONDS = 540
-export const WAIT_TIMEOUT_MS = 590000
 export const ADMIT_TIMEOUT_MS = 30000
 export const CONVERSATIONS_LIMIT = 500
 
@@ -71,7 +69,7 @@ export function typeOf(pluginName, fullType) {
   const prefix = pluginName + ':'
   if (typeof fullType !== 'string' || !fullType.startsWith(prefix)) return null
   const name = fullType.slice(prefix.length)
-  return agentTypeNames().includes(name) ? name : null
+  return agentTypeNames().includes(name) || name === ATTACH_TYPE ? name : null
 }
 
 // turnPrompt is the newest user message of a subagent's conversation: the
@@ -123,10 +121,6 @@ export function firstTurnCommand(type, bin, sessionId, prompt) {
 export function followUpCommand(bin, sessionId, conversationId, prompt) {
   if (prompt === '') return fail('the prompt is empty')
   return { argv: [bin, 'send', conversationId, ...jobFlags(sessionId), '-'], stdin: prompt }
-}
-
-export function waitCommand(bin, runId) {
-  return [bin, 'wait', runId, '--timeout', String(WAIT_SECONDS), '--json']
 }
 
 // isWaitTimeout tells a wait that gave up while the run goes on from a run
@@ -223,4 +217,153 @@ export function staleGateKeys(gates) {
 
 export function conversationOf(records, agentId) {
   return records.find((entry) => entry.agent_id === agentId)?.conversation_id ?? null
+}
+
+// Following a run while it works. The step hook waits in short slices and,
+// after each, shows what the provider did since the last one as thinking:
+// drawn in the agent's row, never recorded in its transcript.
+export const SLICE_SECONDS = 5
+export const SLICE_TIMEOUT_MS = 60000
+export const HEARTBEAT_MS = 30000
+
+export function sliceWaitCommand(bin, runId) {
+  return [bin, 'wait', runId, '--timeout', String(SLICE_SECONDS), '--json']
+}
+
+export function progressCommand(bin, runId, from) {
+  return [bin, 'progress', runId, '--from', String(from), '--json']
+}
+
+// readProgress reads `progress --json`: the entries and where the next read
+// starts, or null when it is not a progress listing.
+export function readProgress(stdout) {
+  try {
+    const parsed = JSON.parse(stdout)
+    if (!parsed || !Array.isArray(parsed.entries) || typeof parsed.next !== 'number') return null
+    return { next: parsed.next, entries: parsed.entries }
+  } catch {
+    return null
+  }
+}
+
+export function progressLine(entry) {
+  return entry.kind === 'command' ? '$ ' + entry.text : String(entry.text ?? '')
+}
+
+export function formatElapsed(ms) {
+  const seconds = Math.max(0, Math.floor(ms / 1000))
+  const minutes = Math.floor(seconds / 60)
+  return minutes === 0 ? seconds + 's' : minutes + 'm ' + (seconds % 60) + 's'
+}
+
+export function heartbeatLine(elapsedMs) {
+  return 'still working · ' + formatElapsed(elapsedMs)
+}
+
+// The hidden agent type the mod spawns itself to show a run another caller
+// started with --agent-feedback (a hook's review, a script's job). It is never
+// offered to the model, and its completion is not handed to Claude: the
+// caller that started the run delivers its result.
+export const ATTACH_TYPE = 'run'
+export const ATTACHED_KEY = 'agent-attached'
+const ATTACH_PROMPT = /^agentcli run (\S+)$/
+
+export function attachSpec() {
+  return {
+    name: ATTACH_TYPE,
+    description: 'Shows an agentcli run another caller started with --agent-feedback. Spawned by the agent-cli plugin only.',
+    prompt: FALLTHROUGH_PROMPT,
+    model: 'haiku',
+    tools: ['Read'],
+    omitClaudeMd: true,
+    background: true,
+  }
+}
+
+export function attachPrompt(runId) {
+  return 'agentcli run ' + runId
+}
+
+export function attachedRunId(prompt) {
+  return ATTACH_PROMPT.exec(prompt.trim())?.[1] ?? null
+}
+
+export function attachDescription(run) {
+  return run.scenario + ' · ' + run.source
+}
+
+// attachAnswer is the one line an attach agent ends with.
+export function attachAnswer(run) {
+  return 'agentcli run ' + run.run_id + ' (' + run.scenario + ', from ' + run.source + ') finished: ' + (run.outcome ?? run.state)
+}
+
+// flaggedRuns keeps the runs of a `status --json` listing that ask to be shown
+// as agents and are still going. The agent types' own runs already have their
+// row, and a run that ended before a poll saw it has nothing left to show.
+export function flaggedRuns(stdout) {
+  try {
+    const parsed = JSON.parse(stdout)
+    const runs = parsed && Array.isArray(parsed.runs) ? parsed.runs : []
+    return runs.filter(isShownElsewhere)
+  } catch {
+    return []
+  }
+}
+
+function isShownElsewhere(run) {
+  if (!run || typeof run.run_id !== 'string') return false
+  return run.agent_feedback === true && run.source !== AGENT_SOURCE && !isTerminal(run.state)
+}
+
+const TASK_ID = /<task-id>([^<]+)<\/task-id>/
+const TASK_RESULT = /<result>([\s\S]*?)<\/result>/
+
+// taskIdOf reads the agent id out of a task notification's text.
+export function taskIdOf(text) {
+  return TASK_ID.exec(String(text ?? ''))?.[1].trim() ?? null
+}
+
+export function droppedNoticeText(text) {
+  const result = TASK_RESULT.exec(String(text ?? ''))?.[1].trim()
+  return 'agent-cli: ' + (result || 'a run shown as an agent finished') + ' (its caller reports the result)'
+}
+
+// terminalRunIds is a key that changes whenever one more run of the session
+// ends, so the token count is read again only then.
+export function terminalRunIds(stdout) {
+  try {
+    const parsed = JSON.parse(stdout)
+    const runs = parsed && Array.isArray(parsed.runs) ? parsed.runs : []
+    return runs.filter((run) => run && isTerminal(run.state)).map((run) => run.run_id).sort().join(' ')
+  } catch {
+    return ''
+  }
+}
+
+export function sessionStatsCommand(bin, sessionId) {
+  return [bin, 'stats', '--session-id', sessionId, '--all', '--json']
+}
+
+// tokensText is the session's Codex token use for the status line, or
+// undefined when none of its runs reported usage.
+export function tokensText(stdout) {
+  try {
+    const totals = JSON.parse(stdout).usage_totals
+    if (!totals || !(totals.runs_with_usage > 0)) return undefined
+    return 'Codex ' + compactCount(totals.input_tokens) + ' in · ' + compactCount(totals.output_tokens) + ' out'
+  } catch {
+    return undefined
+  }
+}
+
+export function compactCount(n) {
+  const value = Number(n) || 0
+  if (value >= 1e6) return (value / 1e6).toFixed(1).replace(/\.0$/, '') + 'M'
+  if (value >= 1e3) return (value / 1e3).toFixed(1).replace(/\.0$/, '') + 'k'
+  return String(value)
+}
+
+export function statusLine(jobsText, tokens) {
+  const parts = [jobsText, tokens].filter((part) => typeof part === 'string' && part !== '')
+  return parts.length === 0 ? undefined : parts.join(' · ')
 }

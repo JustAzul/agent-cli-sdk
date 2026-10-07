@@ -58,6 +58,7 @@ export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
     // The agent id of every model request that reached the model beneath the
     // plugin; undefined for the main loop.
     modelSteps: [] as (string | undefined)[],
+    spawns: [] as any[],
   }
   on('session.start', () => ({ cwd: '/work' }))
   on('session.id', () => ({ value: w.sessionId }))
@@ -106,6 +107,12 @@ export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
     return { value: { agent: 'agent-cli:' + e.name } }
   })
   on('agent.list', () => ({ value: w.agents.map((a) => ({ ...a, description: '', status: 'running' })) }))
+  on('agent.spawn', (_$: any, e: any) => {
+    w.spawns.push(e)
+    const agentId = 'ag-spawned-' + w.spawns.length
+    w.agents.push({ id: agentId, type: e.subagentType ?? e.subagent_type })
+    return { model: 'claude-haiku-4-5', agentId }
+  })
   on('agent.offer', () => ({ isOffered: true }))
   on('skill.prompt', (_$: any, e: any) => ({ text: e.text }))
   on('session.messages', (_$: any, e: any) => {
