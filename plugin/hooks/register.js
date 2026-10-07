@@ -25,7 +25,6 @@ import {
   ADMIT_TIMEOUT_MS,
   CONVERSATIONS_KEY,
   DISPATCH_SKILL,
-  GATE_KEY,
   LOST_CONVERSATION,
   WAIT_TIMEOUT_MS,
   agentSpecs,
@@ -34,13 +33,14 @@ import {
   finishedRun,
   firstTurnCommand,
   followUpCommand,
+  gateKey,
   handoffFailure,
   hasAnswered,
-  isGateOpen,
+  isGateKey,
   isWaitTimeout,
-  openGate,
   readConversations,
   rememberConversation,
+  staleGateKeys,
   turnPrompt,
   typeOf,
   waitCommand,
@@ -74,6 +74,7 @@ export function register(on) {
   on('session.start', async ($, e, next) => {
     await registerTools($)
     await registerAgentTypes($)
+    await pruneGates($).catch((error) => $.ui.log('could not prune agent gates: ' + messageOf(error), { to: 'debug' }))
     if (timer !== null) timer.cancel()
     timer = $.clock.every(POLL_MS, () => {
       void poll($)
@@ -101,7 +102,7 @@ export function register(on) {
   // The agent types. Every way these hooks can fail ends in an answer that
   // says the hand-off failed, never in a Claude model's answer.
   on('skill.prompt', async ($, e, next) => {
-    if (e.skill === $.plugin.name + ':' + DISPATCH_SKILL) await $.store.set(GATE_KEY, openGate(await $.store.get(GATE_KEY), await $.session.id()))
+    if (e.skill === $.plugin.name + ':' + DISPATCH_SKILL) await $.store.set(gateKey(await $.session.id()), new Date().toISOString())
     return next(e)
   })
 
@@ -301,7 +302,14 @@ async function registerAgentTypes($) {
 // The agent types are offered to the model only once the dispatch skill has
 // loaded in this session.
 async function isOfferedHere($) {
-  return isGateOpen(await $.store.get(GATE_KEY), await $.session.id())
+  return (await $.store.get(gateKey(await $.session.id()))) !== undefined
+}
+
+// pruneGates keeps the gate keys of the most recently opened sessions.
+async function pruneGates($) {
+  const keys = (await $.store.keys()).filter(isGateKey)
+  const gates = await Promise.all(keys.map(async (key) => ({ key, openedAt: await $.store.get(key) })))
+  for (const key of staleGateKeys(gates)) await $.store.delete(key)
 }
 
 // subagentTypeOf returns this plugin's type name for the agent whose loop an

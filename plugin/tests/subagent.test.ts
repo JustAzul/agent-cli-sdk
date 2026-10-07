@@ -328,3 +328,17 @@ test('another session loading the dispatch skill does not close this session', a
 
   expect(await offer()).toEqual({ isOffered: true })
 })
+
+test('session start keeps the gates of the 500 most recently opened sessions', async ($, on) => {
+  const gates: Record<string, unknown> = { notified: ['run-1'] }
+  for (let i = 0; i < 502; i++) gates['agent-gate:s-' + i] = new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString()
+  const w = world(on, { store: gates })
+  await $.session.start(START)
+
+  const kept = [...w.store.keys()].filter((key) => key.startsWith('agent-gate:'))
+  expect(kept.length).toBe(500)
+  expect(kept).not.toContain('agent-gate:s-0')
+  expect(kept).not.toContain('agent-gate:s-1')
+  expect(kept).toContain('agent-gate:s-2')
+  expect(w.store.get('notified')).toEqual(['run-1'])
+})

@@ -7,8 +7,8 @@ import { RESULT_OUTPUT_BYTES, cutBytes, resultNote } from './lib.js'
 
 export const AGENT_SOURCE = 'agent'
 export const DISPATCH_SKILL = 'dispatch'
-export const GATE_KEY = 'agent-gate'
 export const GATE_LIMIT = 500
+const GATE_PREFIX = 'agent-gate:'
 export const CONVERSATIONS_KEY = 'agent-conversations'
 export const WAIT_SECONDS = 540
 export const WAIT_TIMEOUT_MS = 590000
@@ -203,20 +203,22 @@ export function rememberConversation(records, agentId, conversationId) {
   return [...others, { agent_id: agentId, conversation_id: conversationId }].slice(-CONVERSATIONS_LIMIT)
 }
 
-// openGate adds a session to the persisted set of sessions whose dispatch
-// skill has loaded, keeping the most recent GATE_LIMIT. The set is shared by
-// every session, so one session opening its gate never closes another's.
-export function openGate(stored, sessionId) {
-  const others = readSessions(stored).filter((id) => id !== sessionId)
-  return [...others, sessionId].slice(-GATE_LIMIT)
+// gateKey is where a session records that its dispatch skill has loaded. One
+// key per session: sessions never write each other's, so none can close
+// another's gate.
+export function gateKey(sessionId) {
+  return GATE_PREFIX + sessionId
 }
 
-export function isGateOpen(stored, sessionId) {
-  return readSessions(stored).includes(sessionId)
+export function isGateKey(key) {
+  return typeof key === 'string' && key.startsWith(GATE_PREFIX)
 }
 
-function readSessions(stored) {
-  return Array.isArray(stored) ? stored.filter((id) => typeof id === 'string') : []
+// staleGateKeys picks the gate keys to drop so that the GATE_LIMIT most
+// recently opened remain; `gates` holds each key with the time it was opened.
+export function staleGateKeys(gates) {
+  const newestFirst = [...gates].sort((a, b) => String(b.openedAt).localeCompare(String(a.openedAt)))
+  return newestFirst.slice(GATE_LIMIT).map((gate) => gate.key)
 }
 
 export function conversationOf(records, agentId) {
