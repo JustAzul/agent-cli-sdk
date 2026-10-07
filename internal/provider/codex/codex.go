@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/JustAzul/agent-cli-sdk/internal/provider"
@@ -178,6 +179,11 @@ type rawEvent struct {
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error"`
+	Item *struct {
+		Type    string `json:"type"`
+		Text    string `json:"text"`
+		Command string `json:"command"`
+	} `json:"item"`
 }
 
 func (adapter) ParseEvent(line []byte) (provider.Event, bool) {
@@ -201,8 +207,44 @@ func (adapter) ParseEvent(line []byte) (provider.Event, bool) {
 			return provider.Event{}, true
 		}
 		return provider.Event{ErrorMsg: unwrapMessage(raw.Error.Message)}, true
+	case "item.started", "item.completed":
+		return provider.Event{Progress: itemProgress(raw)}, true
 	}
 	return provider.Event{}, true
+}
+
+// itemProgress reports a command as it starts and text as it completes; every
+// other item, and the other half of each, shows nothing new.
+func itemProgress(raw rawEvent) *provider.Progress {
+	if raw.Item == nil {
+		return nil
+	}
+	switch {
+	case raw.Type == "item.started" && raw.Item.Type == "command_execution" && raw.Item.Command != "":
+		return &provider.Progress{Kind: "command", Text: shellCommand(raw.Item.Command)}
+	case raw.Type == "item.completed" && raw.Item.Type == "agent_message" && raw.Item.Text != "":
+		return &provider.Progress{Kind: "message", Text: raw.Item.Text}
+	case raw.Type == "item.completed" && raw.Item.Type == "reasoning" && raw.Item.Text != "":
+		return &provider.Progress{Kind: "reasoning", Text: raw.Item.Text}
+	}
+	return nil
+}
+
+// shellWrapper matches how codex runs a command: `<shell> -lc <command>`, the
+// command quoted when it holds spaces.
+var shellWrapper = regexp.MustCompile(`^\S*sh -lc (.+)$`)
+
+// shellCommand is the command codex ran, without the shell that ran it.
+func shellCommand(command string) string {
+	m := shellWrapper.FindStringSubmatch(command)
+	if m == nil {
+		return command
+	}
+	inner := m[1]
+	if len(inner) >= 2 && inner[0] == '\'' && inner[len(inner)-1] == '\'' {
+		return inner[1 : len(inner)-1]
+	}
+	return inner
 }
 
 // unwrapMessage returns .error.message when msg is itself a JSON document

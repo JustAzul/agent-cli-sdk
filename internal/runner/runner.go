@@ -15,6 +15,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/JustAzul/agent-cli-sdk/internal/provider"
 	"github.com/JustAzul/agent-cli-sdk/internal/store"
@@ -448,10 +449,15 @@ type streamResult struct {
 	sessionID string
 }
 
-// consume parses provider stdout line by line as it arrives and persists the
-// provider session id as soon as it is seen.
+// consume parses provider stdout line by line as it arrives, persists the
+// provider session id as soon as it is seen and appends what the provider
+// does to the run's progress file.
 func (j *Job) consume(r io.Reader, st store.State) streamResult {
 	var res streamResult
+	progress := j.openProgress(st.RunID)
+	if progress != nil {
+		defer progress.Close()
+	}
 	br := bufio.NewReader(r)
 	for {
 		line, err := br.ReadBytes('\n')
@@ -471,12 +477,50 @@ func (j *Job) consume(r io.Reader, st store.State) streamResult {
 				if ev.ErrorMsg != "" {
 					res.lastError = ev.ErrorMsg
 				}
+				if ev.Progress != nil && progress != nil {
+					j.appendProgress(progress, ev.Progress)
+				}
 			}
 		}
 		if err != nil {
 			return res
 		}
 	}
+}
+
+// openProgress opens the run's progress file, or returns nil when it cannot:
+// a run with no progress to show still runs.
+func (j *Job) openProgress(runID string) *store.ProgressWriter {
+	w, err := j.Store.OpenProgress(runID)
+	if err != nil {
+		j.Warn(fmt.Sprintf("could not open the progress file: %v", err))
+		return nil
+	}
+	return w
+}
+
+func (j *Job) appendProgress(w *store.ProgressWriter, p *provider.Progress) {
+	if err := w.Append(j.Now(), p.Kind, progressLine(p.Text)); err != nil {
+		j.Warn(fmt.Sprintf("could not append to the progress file: %v", err))
+	}
+}
+
+// progressTextBytes bounds one progress entry: it is a line to follow the run
+// by, and the output file holds the whole text.
+const progressTextBytes = 500
+
+// progressLine folds text onto one line and cuts it at progressTextBytes,
+// never inside a character.
+func progressLine(text string) string {
+	line := strings.Join(strings.Fields(text), " ")
+	if len(line) <= progressTextBytes {
+		return line
+	}
+	cut := progressTextBytes
+	for cut > 0 && !utf8.RuneStart(line[cut]) {
+		cut--
+	}
+	return line[:cut] + "…"
 }
 
 func (j *Job) persistSession(conversationID, sessionID string) {

@@ -109,9 +109,17 @@ func NormalizeUsage(command string, u *Usage) *Usage {
 
 // Event is what one provider output line reveals.
 type Event struct {
-	SessionID string // non-empty when this event reveals the provider session
-	Usage     *Usage // non-nil on usage-bearing events
-	ErrorMsg  string // non-empty on error-bearing events
+	SessionID string    // non-empty when this event reveals the provider session
+	Usage     *Usage    // non-nil on usage-bearing events
+	ErrorMsg  string    // non-empty on error-bearing events
+	Progress  *Progress // non-nil on events that show what the provider is doing
+}
+
+// Progress is one thing the provider did while it worked, as a person
+// following the run would read it.
+type Progress struct {
+	Kind string // command (a command it started), message (text it wrote) or reasoning
+	Text string
 }
 
 // Provider adapts one agent CLI.
