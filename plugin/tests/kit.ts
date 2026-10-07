@@ -130,6 +130,12 @@ export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
   })
   // Anything the mod does not answer itself falls through to here.
   on('tool.call', () => ({ result: 'unanswered' }))
+  // The engine's own band above the prompt: a survey while one holds it,
+  // otherwise empty.
+  on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => {
+    const { Box, Text } = $.ui.resolve(e)
+    return e.props.hasSurvey ? h(Box, {}, h(Text, {}, 'How is Claude doing this session?')) : h(Box, {})
+  })
   return w
 }
 

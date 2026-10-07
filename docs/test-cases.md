@@ -95,7 +95,7 @@ Unless stated otherwise:
 - [ ] **hand-off failure (FR64):** an agentcli failure (exit 3, busy) → the answer starts with `agent-cli: the hand-off to the agent failed` and no model request is made.
 - [ ] **progress (FR66):** fake `review-ok` → `agentcli progress <run_id> --json` lists the two commands and the final message in order, `next: 3`; `--from 3` lists none; an unknown run exits 4.
 - [ ] **agent feedback flag (FR68):** `--agent-feedback --session-id s` → `agent_feedback: true` in `request.json` and `status --json`; `AGENTCLI_AGENT_FEEDBACK=1` likewise; with no session id the run exits 0, `agent_feedback: false`, and stderr says it was ignored.
-- [ ] **flagged run shown (FR69):** a hook starts a foreground `exec --agent-feedback` in the session → within one poll a background agent row appears and follows the run; when it ends, Claude receives no notification for it.
+- [ ] **flagged run shown (FR69):** a hook starts a foreground `exec --agent-feedback` in the session → within one poll a line `agentcli · <scenario> · <source> · <elapsed> · <newest step>` appears above the prompt and follows what the run does; within 5 seconds of the run ending the line is gone. A run started by the agent types, or without the flag, gets no line. No agent row appears, no model request is made, and Claude receives nothing about the run.
 - [ ] **model used (FR70):** a run on the provider's default model records `model: null` and `model_used` equal to the model in the provider's session file; `stats --session-id s --json` counts only that session and lists its tokens under `usage_by_model`.
 
 ## Edge Cases

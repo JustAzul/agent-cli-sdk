@@ -83,8 +83,8 @@ Use the CLI when you need what neither carries: `--attr` and `annotate`,
 `--timeout`, `--prompt-file`, `--json`, `--dry-run`, a foreground run, scripts,
 or when the plugin is not loaded. All three reach the same runs and
 conversations. A CLI run started with `--agent-feedback` (see
-`references/cli.md`) shows as a background agent too, while its result stays
-with whoever started it.
+`references/cli.md`) shows in a band above the prompt while it works, and its
+result stays with whoever started it.
 
 ## Run it from the CLI
 

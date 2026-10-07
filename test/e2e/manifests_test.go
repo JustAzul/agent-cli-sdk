@@ -32,6 +32,11 @@ func TestPluginManifest(t *testing.T) {
 	if d, _ := m["description"].(string); d == "" {
 		t.Error("plugin.json has no description")
 	}
+	// An update to a version that adds a dependency leaves an existing install
+	// unloaded until someone installs the dependency by hand.
+	if _, has := m["dependencies"]; has {
+		t.Errorf("plugin.json dependencies = %v, want none", m["dependencies"])
+	}
 }
 
 func TestMarketplaceManifest(t *testing.T) {

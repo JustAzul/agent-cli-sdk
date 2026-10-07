@@ -155,7 +155,7 @@ func parseTurnArgs(ctx *Context, spec turnSpec, args []string) (p parsedTurn, ex
 	fs.BoolVar(&f.dryRun, "dry-run", false, "print the provider plan and execute nothing")
 	fs.BoolVar(&f.background, "background", false, "admit the run as a job and return once its worker is running")
 	fs.BoolVar(&f.agentFeedback, "agent-feedback", isOn(ctx.Getenv(agentFeedbackEnv)),
-		"show the run as a background agent in its Claude Code session (needs a session id; default from "+agentFeedbackEnv+")")
+		"show the run in its Claude Code session while it works (needs a session id; default from "+agentFeedbackEnv+")")
 	if spec.extra != nil {
 		spec.extra(fs)
 	}

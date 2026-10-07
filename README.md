@@ -221,9 +221,11 @@ agent types do not carry:
 When a job started through these tools finishes, the mod shows a toast and
 hands Claude a notice with the outcome and the output (inline up to 8 KiB).
 
-A run any other caller starts with `--agent-feedback` (see below) shows as a
-background agent of its session too, for as long as it runs. Its completion is
-not handed to Claude: the caller that started it delivers its result.
+A run any other caller starts with `--agent-feedback` (see below), such as a
+hook's review, shows in a band above the prompt while it works: one line with
+its scenario, its source, how long it has run and the latest thing it did,
+gone once it ends. Only you see the band: nothing about the run reaches
+Claude, and the caller that started it delivers its result.
 
 The status line counts the session's running jobs and its Codex token use
 (`Codex 1.4M in · 7.2k out`). `/agent-cli-jobs` lists the session's jobs at
@@ -242,8 +244,8 @@ out=$("$agentcli" exec --scenario code-review --source hook-post-commit \
 ```
 
 Useful flags:
-- `--agent-feedback` shows the run as a background agent in its Claude Code
-  session while it works; `AGENTCLI_AGENT_FEEDBACK=1` does the same for a
+- `--agent-feedback` shows the run in the band above the prompt of its Claude
+  Code session while it works; `AGENTCLI_AGENT_FEEDBACK=1` does the same for a
   caller that cannot change its arguments (an older agentcli ignores the
   variable). It needs a session id; without one the run goes ahead unflagged
   and stderr says why.

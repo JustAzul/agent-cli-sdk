@@ -38,11 +38,12 @@ Shared by `exec`, `review` and `send`:
   ignored), otherwise the label (default `ok`). Use them when "nothing to report"
   is a known sentence.
 - `--run-id <id>`: choose the run id (letters, digits, `.`, `_`, `-`; must be new).
-- `--agent-feedback` (or `AGENTCLI_AGENT_FEEDBACK=1`): show the run as a
-  background agent in its Claude Code session while it works. It needs a
-  session id (`--session-id`, else `$CLAUDE_CODE_SESSION_ID`); without one the
-  run goes ahead unflagged and stderr says why. The agent's completion is not
-  handed to Claude: whoever started the run delivers its result.
+- `--agent-feedback` (or `AGENTCLI_AGENT_FEEDBACK=1`): show the run in the band
+  above the prompt of its Claude Code session while it works: its scenario,
+  source, elapsed time and newest step. It needs a session id (`--session-id`,
+  else `$CLAUDE_CODE_SESSION_ID`); without one the run goes ahead unflagged and
+  stderr says why. Nothing about the run is handed to Claude: whoever started
+  the run delivers its result.
 - `--dry-run`: print the resolved plan as JSON and execute nothing.
 - `--json`: one JSON object instead of the output path.
 - `-- <native flags>`: passed to the provider. `-o`, `--json`, `-C`, `-m`, `-s`,

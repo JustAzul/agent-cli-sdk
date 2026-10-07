@@ -110,8 +110,8 @@ type runView struct {
 	Scenario   string  `json:"scenario"`
 	Source     string  `json:"source"`
 	SessionID  *string `json:"session_id"`
-	// AgentFeedback asks the run's Claude Code session to show it as a
-	// background agent; the agent-cli plugin reads it here.
+	// AgentFeedback asks the run's Claude Code session to show it while it
+	// works; the agent-cli plugin reads it here.
 	AgentFeedback bool    `json:"agent_feedback"`
 	AdmittedAt    string  `json:"admitted_at"`
 	StartedAt     *string `json:"started_at"`

@@ -67,7 +67,7 @@ export function typeOf(pluginName, fullType) {
   const prefix = pluginName + ':'
   if (typeof fullType !== 'string' || !fullType.startsWith(prefix)) return null
   const name = fullType.slice(prefix.length)
-  return agentTypeNames().includes(name) || name === ATTACH_TYPE ? name : null
+  return agentTypeNames().includes(name) ? name : null
 }
 
 // turnPrompt is the newest user message of a subagent's conversation: the
@@ -220,7 +220,7 @@ export function readProgress(stdout) {
   try {
     const parsed = JSON.parse(stdout)
     if (!parsed || !Array.isArray(parsed.entries) || typeof parsed.next !== 'number') return null
-    return { next: parsed.next, entries: parsed.entries }
+    return { next: parsed.next, entries: parsed.entries, state: typeof parsed.state === 'string' ? parsed.state : null }
   } catch {
     return null
   }
@@ -238,74 +238,6 @@ export function formatElapsed(ms) {
 
 export function heartbeatLine(elapsedMs) {
   return 'still working · ' + formatElapsed(elapsedMs)
-}
-
-// The hidden agent type the mod spawns itself to show a run another caller
-// started with --agent-feedback (a hook's review, a script's job). It is never
-// offered to the model, and its completion is not handed to Claude: the
-// caller that started the run delivers its result.
-export const ATTACH_TYPE = 'run'
-export const ATTACHED_KEY = 'agent-attached'
-const ATTACH_PROMPT = /^agentcli run (\S+)$/
-
-export function attachSpec() {
-  return {
-    name: ATTACH_TYPE,
-    description: 'Shows an agentcli run another caller started with --agent-feedback. Spawned by the agent-cli plugin only.',
-    prompt: FALLTHROUGH_PROMPT,
-    model: 'haiku',
-    tools: ['Read'],
-    omitClaudeMd: true,
-    background: true,
-  }
-}
-
-export function attachPrompt(runId) {
-  return 'agentcli run ' + runId
-}
-
-export function attachedRunId(prompt) {
-  return ATTACH_PROMPT.exec(prompt.trim())?.[1] ?? null
-}
-
-export function attachDescription(run) {
-  return run.scenario + ' · ' + run.source
-}
-
-// attachAnswer is the one line an attach agent ends with.
-export function attachAnswer(run) {
-  return 'agentcli run ' + run.run_id + ' (' + run.scenario + ', from ' + run.source + ') finished: ' + (run.outcome ?? run.state)
-}
-
-// flaggedRuns keeps the runs of a `status --json` listing that ask to be shown
-// as agents and are still going. The agent types' own runs already have their
-// row, and a run that ended before a poll saw it has nothing left to show.
-export function flaggedRuns(stdout) {
-  try {
-    const parsed = JSON.parse(stdout)
-    const runs = parsed && Array.isArray(parsed.runs) ? parsed.runs : []
-    return runs.filter(isShownElsewhere)
-  } catch {
-    return []
-  }
-}
-
-function isShownElsewhere(run) {
-  if (!run || typeof run.run_id !== 'string') return false
-  return run.agent_feedback === true && run.source !== AGENT_SOURCE && !isTerminal(run.state)
-}
-
-const TASK_ID = /<task-id>([^<]+)<\/task-id>/
-const TASK_RESULT = /<result>([\s\S]*?)<\/result>/
-
-// taskIdOf reads the agent id out of a task notification's text.
-export function taskIdOf(text) {
-  return TASK_ID.exec(String(text ?? ''))?.[1].trim() ?? null
-}
-
-export function droppedNoticeText(text) {
-  const result = TASK_RESULT.exec(String(text ?? ''))?.[1].trim()
-  return 'agent-cli: ' + (result || 'a run shown as an agent finished') + ' (its caller reports the result)'
 }
 
 // terminalRunIds is a key that changes whenever one more run of the session

@@ -39,8 +39,8 @@ test('the mod registers one background agent type per scenario, only for when th
   const w = world(on)
   await $.session.start(START)
 
-  expect(w.agentTypes.map((t) => t.name).sort()).toEqual([...TYPES, 'run'].sort())
-  for (const spec of w.agentTypes.filter((t) => t.name !== 'run')) {
+  expect(w.agentTypes.map((t) => t.name).sort()).toEqual([...TYPES].sort())
+  for (const spec of w.agentTypes) {
     expect(spec.background).toBe(true)
     expect(spec.description).toContain('Use only when the user asks')
     // If the hook ever fails to answer, the stand-in model is the cheapest one

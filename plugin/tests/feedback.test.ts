@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import { POLL_MS, SESSION, job, listing, ok, step, world } from './kit'
 import { compactCount, heartbeatLine } from '../hooks/subagent.js'
+import { BAND_REFRESH_MS, bandLine, withProgress } from '../hooks/band.js'
 
 const START = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 
@@ -54,71 +55,110 @@ test('a quiet run shows a heartbeat with the time it has been working', () => {
   expect(compactCount(999)).toBe('999')
 })
 
-test('a run another caller flagged is shown once as a hidden agent of the session', async ($, on) => {
+// What the engine hands the band: a terminal 100 cells wide, no survey.
+const BAND_PROPS = { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 9 } } as any
+
+test('a run another caller flagged shows in the band with its latest step until it ends', async ($, on) => {
   const w = world(on)
-  const hookRun = job({ run_id: 'run-h', state: 'running', source: 'hook-post-commit', scenario: 'code-review', background: false, agent_feedback: true })
-  w.respond = () =>
-    listing(
-      hookRun,
+  let hookState = 'running'
+  const reads: string[] = []
+  w.respond = (argv) => {
+    if (argv[1] === 'progress') {
+      reads.push(argv[4]!)
+      const entries = argv[4] === '0' ? [{ seq: 0, at: 't', kind: 'message', text: 'I will read\n  auth.go' }, { seq: 1, at: 't', kind: 'command', text: 'rg -n token auth.go' }] : []
+      return ok(JSON.stringify({ run_id: 'run-h', state: hookState, next: 2, entries }))
+    }
+    if (argv[1] === 'stats') return ok(JSON.stringify({ usage_totals: {} }))
+    return listing(
+      job({ run_id: 'run-h', state: 'running', source: 'hook-post-commit', scenario: 'code-review', background: false, agent_feedback: true, started_at: '1970-01-01T00:00:00Z' }),
       job({ run_id: 'run-own', state: 'running', source: 'agent', agent_feedback: true }),
-      job({ run_id: 'run-done', state: 'done', outcome: 'ok', source: 'hook-stop', agent_feedback: true }),
       job({ run_id: 'run-plain', state: 'running', source: 'cli' }),
     )
-  await $.session.start(START)
-
-  await w.clock.advance(POLL_MS * 2)
-
-  expect(w.spawns.length).toBe(1)
-  // A plugin's spawn reaches the engine as a background Agent call.
-  expect(w.spawns[0]).toMatchObject({ subagent_type: 'agent-cli:run', description: 'code-review · hook-post-commit', prompt: 'agentcli run run-h', run_in_background: true })
-  expect(w.store.get('agent-attached')).toEqual(['run-h'])
-})
-
-test('the hidden agent follows the run it was given and starts none', async ($, on) => {
-  const w = world(on)
-  w.respond = (argv) => {
-    if (argv[1] === 'wait') return finishedRun({ run_id: 'run-h' })
-    if (argv[1] === 'progress') return progress(1, [{ kind: 'command', text: 'git diff HEAD~1' }])
-    if (argv[1] === 'status') return finishedRun({ run_id: 'run-h', scenario: 'code-review', source: 'hook-post-commit', outcome: 'findings' })
-    throw new Error('unexpected agentcli call: ' + argv.join(' '))
   }
-  w.agents.push({ id: 'ag-h', type: 'agent-cli:run' })
-  w.messages['ag-h'] = [{ role: 'user', text: 'agentcli run run-h' }]
   await $.session.start(START)
+  await w.clock.advance(POLL_MS)
 
-  const out = await step($, 'ag-h')
+  // The agent types' own runs show as their agents, and an unflagged run not at all.
+  for (const surface of ['desktop', 'vscode', 'mobile'] as const) {
+    const elsewhere = await $.ui.mount({ plugin: 'agent-cli', surface, component: 'AbovePrompt', props: BAND_PROPS })
+    expect((await elsewhere.findAll({ type: 'Text' })).map((t) => t.text)).toEqual(['agentcli · code-review · hook-post-commit · 15s · $ rg -n token auth.go'])
+  }
+  const band = await $.ui.mount({ plugin: 'agent-cli', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS })
+  expect((await band.findAll({ type: 'Text' })).map((t) => t.text)).toEqual(['agentcli · code-review · hook-post-commit · 15s · $ rg -n token auth.go'])
+  // A survey holding the band stays, under the line.
+  const withSurvey = await $.ui.mount({ plugin: 'agent-cli', surface: 'terminal', component: 'AbovePrompt', props: { ...BAND_PROPS, hasSurvey: true } })
+  expect((await withSurvey.findAll({ type: 'Text' })).map((t) => t.text)).toEqual([
+    'agentcli · code-review · hook-post-commit · 15s · $ rg -n token auth.go',
+    'How is Claude doing this session?',
+  ])
 
-  expect(w.runs.map((r) => r.argv[1])).toEqual(['wait', 'progress', 'status'])
-  expect(w.runs[0]!.argv.slice(2, 3)).toEqual(['run-h'])
-  expect(thinkingOf(out.chunks)).toContain('$ git diff HEAD~1')
-  expect(out.text).toBe('agentcli run run-h (code-review, from hook-post-commit) finished: findings')
-  expect(w.modelSteps).toEqual([])
+  // Between polls the band reads on from where it stopped, and lets the run
+  // go as soon as a read finds it ended.
+  hookState = 'done'
+  await w.clock.advance(BAND_REFRESH_MS)
+  expect(reads[0]).toBe('0')
+  expect(reads.slice(1).every((from) => from === '2')).toBe(true)
+  expect(await band.findAll({ type: 'Text' })).toEqual([])
+  // Only the person sees the band: nothing about the run reaches Claude.
+  expect(w.submits).toEqual([])
+  expect(w.spawns).toEqual([])
 })
 
-test("the hidden agent's completion notice is never handed to Claude", async ($, on) => {
+test('after a reload the band keeps what it showed until the first poll has read the runs', async ($, on) => {
   const w = world(on)
-  w.agents.push({ id: 'ag-h', type: 'agent-cli:run' }, { id: 'ag-1', type: 'agent-cli:adhoc' })
+  const writes: unknown[] = []
+  on('state.set', { plugin: 'agent-cli', key: 'hookRuns' }, (_$: any, e: any) => {
+    writes.push(e.value)
+    return { isSet: true, version: writes.length }
+  })
+  w.respond = (argv) => (argv[1] === 'stats' ? ok(JSON.stringify({ usage_totals: {} })) : listing())
   await $.session.start(START)
-  const notice = (id: string) =>
-    `<task-notification>\n<task-id>${id}</task-id>\n<status>completed</status>\n<result>agentcli run run-h (code-review, from hook-post-commit) finished: findings</result>\n</task-notification>`
 
-  const hidden: any = await $.prompt.submit({ text: notice('ag-h'), origin: { kind: 'task-notification' }, wait: false } as any)
-  const own: any = await $.prompt.submit({ text: notice('ag-1'), origin: { kind: 'task-notification' }, wait: false } as any)
+  await w.clock.advance(BAND_REFRESH_MS * 2)
+  expect(writes).toEqual([])
 
-  expect(hidden.drop).toContain('finished: findings')
-  expect(w.submits).toEqual([notice('ag-1')])
-  expect(own.text).toBe(notice('ag-1'))
+  await w.clock.advance(POLL_MS - BAND_REFRESH_MS * 2)
+  expect(writes).toEqual([[]])
 })
 
-test('the hidden agent type is never offered to the model, gate open or not', async ($, on) => {
+test('a band that cannot be written is logged once and written again on the next refresh', async ($, on) => {
   const w = world(on)
+  let attempts = 0
+  on('state.set', { plugin: 'agent-cli', key: 'hookRuns' }, () => {
+    attempts += 1
+    return { deny: 'state host unavailable' }
+  })
+  w.respond = (argv) => {
+    if (argv[1] === 'progress') return ok(JSON.stringify({ run_id: 'run-h', state: 'running', next: 0, entries: [] }))
+    if (argv[1] === 'stats') return ok(JSON.stringify({ usage_totals: {} }))
+    return listing(job({ run_id: 'run-h', state: 'running', source: 'hook-stop', agent_feedback: true }))
+  }
   await $.session.start(START)
-  await $.skill.prompt({ skill: 'agent-cli:dispatch', text: '' })
 
-  const offered = await $.agent.offer({ agent: 'agent-cli:run', description: '', source: 'plugin', provider: { plugin: 'agent-cli', tier: 'user' } } as any)
+  await w.clock.advance(POLL_MS + BAND_REFRESH_MS * 3)
 
-  expect(offered).toEqual({ isOffered: false })
-  expect(w.agentTypes.find((t) => t.name === 'run')).toMatchObject({ background: true })
+  expect(attempts).toBeGreaterThanOrEqual(4)
+  expect(w.logs.filter((l) => l.includes('could not update the band')).length).toBe(1)
+})
+
+test('a band line names the run and shows its newest step on one line', () => {
+  const run = { run_id: 'r', scenario: 'code-review', source: 'hook-stop', startedAt: null, from: 0, line: '' }
+  expect(bandLine(run, 0)).toBe('agentcli · code-review · hook-stop')
+  expect(bandLine({ ...run, startedAt: 1000, line: 'Reading\n\n  the diff  ' }, 96000)).toBe('agentcli · code-review · hook-stop · 1m 35s · Reading the diff')
+})
+
+test('a refresh changes only the runs it read, so a run a poll added meanwhile stays', () => {
+  const run = (id: string, line = '') => ({ run_id: id, scenario: 's', source: 'hook', startedAt: null, from: 0, line })
+  const read = new Map([
+    ['a', { next: 3, text: ['first', 'newest'], state: 'running' }],
+    ['b', { next: 1, text: [], state: 'done' }],
+    ['c', { next: 0, text: [], state: null }],
+  ])
+  expect(withProgress([run('a'), run('b'), run('c', 'kept'), run('new')], read)).toEqual([
+    { ...run('a'), from: 3, line: 'newest' },
+    { ...run('c', 'kept'), from: 0 },
+    run('new'),
+  ])
 })
 
 test("the status line adds the session's Codex tokens, read again when a run ends", async ($, on) => {
@@ -153,20 +193,6 @@ test("the status line adds the session's Codex tokens, read again when a run end
   await w.clock.advance(POLL_MS)
   expect(w.runs.filter((r) => r.argv[1] === 'stats').length).toBe(3)
   expect(w.statuses.at(-1)).toBe('Codex 2.5M in · 9k out')
-})
-
-test('a refused spawn is retried on a later poll and logged once', async ($, on) => {
-  const w = world(on)
-  let refusals = 2
-  w.spawnAnswer = () => (refusals-- > 0 ? { deny: 'background agents are disabled' } : { model: 'claude-haiku-4-5', agentId: 'ag-late' })
-  w.respond = () => listing(job({ run_id: 'run-h', state: 'running', source: 'hook-stop', background: false, agent_feedback: true }))
-  await $.session.start(START)
-
-  await w.clock.advance(POLL_MS * 4)
-
-  expect(w.spawns.length).toBe(3)
-  expect(w.logs.filter((l) => l.includes('could not show run run-h')).length).toBe(1)
-  expect(w.store.get('agent-attached')).toEqual(['run-h'])
 })
 
 test('a token count that cannot be read is read again on the next poll', async ($, on) => {

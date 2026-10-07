@@ -26,21 +26,12 @@ import {
   CONVERSATIONS_KEY,
   DISPATCH_SKILL,
   LOST_CONVERSATION,
-  ATTACHED_KEY,
-  ATTACH_TYPE,
   HEARTBEAT_MS,
   SLICE_TIMEOUT_MS,
   agentSpecs,
   answerText,
-  attachAnswer,
-  attachDescription,
-  attachPrompt,
-  attachSpec,
-  attachedRunId,
   conversationOf,
-  droppedNoticeText,
   finishedRun,
-  flaggedRuns,
   firstTurnCommand,
   followUpCommand,
   handoffFailure,
@@ -55,12 +46,12 @@ import {
   sessionStatsCommand,
   sliceWaitCommand,
   statusLine,
-  taskIdOf,
   terminalRunIds,
   tokensText,
   turnPrompt,
   typeOf,
 } from './subagent.js'
+import { BAND_REFRESH_MS, bandLine, flaggedRuns, followedRuns, withProgress } from './band.js'
 
 const COMMAND = 'agent-cli-jobs'
 const NO_TOOLS = 'agent-cli agents run no tools: an agentcli job answers for them.'
@@ -68,6 +59,10 @@ const NO_TOOLS = 'agent-cli agents run no tools: an agentcli job answers for the
 // offered to the model only then. Session state is never shared with another
 // session, so no session can close another's gate.
 const DISPATCH_LOADED = { plugin: 'agent-cli', key: 'dispatchLoaded' }
+// The band's lines: one for each run another caller flagged with
+// --agent-feedback that is still going. Session state, so the band redraws on
+// each write and a reload keeps what it shows.
+const HOOK_RUNS = { plugin: 'agent-cli', key: 'hookRuns' }
 // A step's response: what the run is doing as thinking, then the answer.
 const THINKING_BLOCK = 0
 const ANSWER_BLOCK = 1
@@ -85,6 +80,15 @@ const TURN_PROPERTIES = {
 // evaluates this file again and starts from scratch.
 let timer = null
 let isPolling = false
+// The flagged runs the band follows, what was read of each, and the lines it
+// last wrote (null until this load writes). Until this load's first poll has
+// read the session's runs, the band keeps what an earlier load wrote.
+let bandTimer = null
+let followed = []
+let shownBand = null
+let hasPolledRuns = false
+let isRefreshingBand = false
+let isBandFailureLogged = false
 let shownStatus = null
 // The terminal runs of the session when its token count was last read, and
 // that count. A run's telemetry record lands just after its terminal state, so
@@ -93,10 +97,8 @@ let shownTerminal = ''
 let shownTokens = undefined
 let isTokensRefreshDue = false
 let isTokensFailureLogged = false
-// Runs whose progress could not be read, and runs that could not be shown as
-// agents, each logged once.
+// Runs whose progress could not be read, each logged once.
 const loggedProgressFailures = new Set()
-const loggedSpawnDenials = new Set()
 // The agent ids this load has resolved: the type name for one of this plugin's
 // agent types, null for any other agent. A reload refills it from $.agent.list().
 const knownTypes = new Map()
@@ -111,6 +113,10 @@ export function register(on) {
     if (timer !== null) timer.cancel()
     timer = $.clock.every(POLL_MS, () => {
       void poll($)
+    })
+    if (bandTimer !== null) bandTimer.cancel()
+    bandTimer = $.clock.every(BAND_REFRESH_MS, () => {
+      void refreshBand($)
     })
     // Last, because a taken command name makes the call throw.
     try {
@@ -142,7 +148,6 @@ export function register(on) {
   on('agent.offer', async ($, e, next) => {
     const type = typeOf($.plugin.name, e.agent)
     if (type === null) return next(e)
-    if (type === ATTACH_TYPE) return { isOffered: false }
     return (await isOfferedHere($)) ? next(e) : { isOffered: false }
   }).catch(($, e, next) => (next.called || typeOf($.plugin.name, e.agent) === null ? next(e) : { isOffered: false }))
 
@@ -161,14 +166,18 @@ export function register(on) {
     return { deny: NO_TOOLS }
   }).catch(($, e, next) => (next.called || !isKnownSubagent(e.agentId) ? next(e) : { deny: NO_TOOLS }))
 
-  // A run shown as an agent belongs to whoever started it, who delivers its
-  // result: its agent's completion notice is shown to the person and never
-  // handed to Claude.
-  on('prompt.submit', async ($, e, next) => {
-    if (e.origin?.kind !== 'task-notification') return next(e)
-    const agentId = taskIdOf(e.text)
-    if (agentId === null || (await subagentTypeOf($, agentId)) !== ATTACH_TYPE) return next(e)
-    return { drop: droppedNoticeText(e.text) }
+  // The band above the prompt shows what the runs other callers flagged are
+  // doing. Only the person sees it; their results stay with their callers.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const { value } = await $.state.get(HOOK_RUNS)
+    const rows = Array.isArray(value) ? value : []
+    if (rows.length === 0) return next(e)
+    // Above whatever else the band holds (a survey, another plugin's line),
+    // never in its place.
+    const below = await next(e)
+    const { Box, Text } = $.ui.resolve(e)
+    const lines = rows.map((row) => h(Text, { dimColor: true, wrap: 'truncate-end' }, row.text))
+    return h(Box, { flexDirection: 'column' }, ...lines, ...(below ? [below] : []))
   }).catch(($, e, next) => next(e))
 }
 
@@ -294,7 +303,9 @@ async function checkJobs($) {
   if (reply.exitCode !== 0) return
   const jobs = modJobs(sessionJobs(reply.stdout))
 
-  await attachFlaggedRuns($, flaggedRuns(reply.stdout))
+  followed = followedRuns(followed, flaggedRuns(reply.stdout))
+  hasPolledRuns = true
+  await refreshBand($)
   await showStatus($, bin, sessionId, runningCount(jobs), terminalRunIds(reply.stdout))
 
   let notified = readNotified(await $.store.get(NOTIFIED_KEY))
@@ -343,30 +354,37 @@ async function sessionTokens($, bin, sessionId) {
   return null
 }
 
-// attachFlaggedRuns shows each run another caller started with
-// --agent-feedback as a background agent of this session, once.
-async function attachFlaggedRuns($, runs) {
-  if (runs.length === 0) return
-  let attached = readNotified(await $.store.get(ATTACHED_KEY))
-  for (const run of runs) {
-    if (attached.includes(run.run_id)) continue
-    // Recorded first, so a failure while spawning never shows the run twice.
-    attached = remember(attached, run.run_id)
-    await $.store.set(ATTACHED_KEY, attached)
-    const spawned = await $.agent.spawn({ subagentType: $.plugin.name + ':' + ATTACH_TYPE, description: attachDescription(run), prompt: attachPrompt(run.run_id) })
-    if (typeof spawned.deny !== 'string') {
-      if (spawned.agentId) knownTypes.set(spawned.agentId, ATTACH_TYPE)
-      continue
+// refreshBand reads what each followed run did since the last read and shows
+// the latest of it in the band, dropping a run once it ends. A failed read
+// leaves the run as it was, and a failed refresh is logged once until one
+// succeeds; the next refresh tries again either way.
+async function refreshBand($) {
+  if (!hasPolledRuns || isRefreshingBand || (followed.length === 0 && shownBand === '[]')) return
+  isRefreshingBand = true
+  try {
+    const bin = shimPath($.plugin.root)
+    const read = new Map()
+    for (const run of followed) read.set(run.run_id, await newProgress($, bin, run.run_id, run.from))
+    // Applied to the list as it is now: a poll may have changed it meanwhile.
+    followed = withProgress(followed, read)
+    const now = await $.clock.now()
+    await showBand($, followed.map((run) => ({ run_id: run.run_id, text: bandLine(run, now) })))
+    isBandFailureLogged = false
+  } catch (error) {
+    if (!isBandFailureLogged) {
+      isBandFailureLogged = true
+      $.ui.log('could not update the band above the prompt: ' + messageOf(error), { to: 'debug' })
     }
-
-    // Refused: unmark it, so a later poll tries again while it runs.
-    attached = attached.filter((id) => id !== run.run_id)
-    await $.store.set(ATTACHED_KEY, attached)
-    if (!loggedSpawnDenials.has(run.run_id)) {
-      loggedSpawnDenials.add(run.run_id)
-      $.ui.log('agent-cli could not show run ' + run.run_id + ' as an agent: ' + spawned.deny)
-    }
+  } finally {
+    isRefreshingBand = false
   }
+}
+
+async function showBand($, rows) {
+  const text = JSON.stringify(rows)
+  if (text === shownBand) return
+  await $.state.set(HOOK_RUNS, rows)
+  shownBand = text
 }
 
 async function readOutput($, bin, runId) {
@@ -391,7 +409,7 @@ async function outputPathOf($, bin, runId) {
 }
 
 async function registerAgentTypes($) {
-  for (const spec of [...agentSpecs(), attachSpec()]) {
+  for (const spec of agentSpecs()) {
     try {
       await $.agent.register(spec)
     } catch (error) {
@@ -439,24 +457,10 @@ async function* answer(e, text) {
 // followTurn shows the turn's run as it works and returns the answer.
 async function* followTurn($, agentId, type, signal) {
   try {
-    if (type === ATTACH_TYPE) return yield* followAttached($, agentId, signal)
     return yield* runSubagentTurn($, agentId, type, signal)
   } catch (error) {
     return handoffFailure(messageOf(error))
   }
-}
-
-// followAttached shows a run another caller started and answers one line.
-async function* followAttached($, agentId, signal) {
-  const rows = await $.session.messages({ agentId })
-  const runId = Array.isArray(rows) ? attachedRunId(turnPrompt(rows)) : null
-  if (runId === null) return handoffFailure('this agent names no run to show.')
-
-  const bin = shimPath($.plugin.root)
-  yield* followRun($, bin, runId, signal)
-  const status = await $.process.run([bin, 'status', runId, '--json'])
-  const run = status.exitCode === 0 ? finishedRun(status.stdout) : null
-  return run === null ? handoffFailure('could not read run ' + runId + '. ' + failureText(status)) : attachAnswer(run)
 }
 
 async function* runSubagentTurn($, agentId, type, signal) {
@@ -473,7 +477,7 @@ async function* runSubagentTurn($, agentId, type, signal) {
   if (ids === null) return handoffFailure('agentcli printed an unexpected admission result: ' + reply.stdout.trim().slice(0, 500))
 
   await recordConversation($, agentId, ids.conversation_id)
-  yield* followRun($, bin, ids.run_id, signal)
+  yield* followOwnRun($, bin, ids.run_id, signal)
   return finalAnswer($, bin, ids.run_id)
 }
 
@@ -503,11 +507,10 @@ async function recordConversation($, agentId, conversationId) {
   }
 }
 
-// followRun waits for the run in short slices and, after each, streams what
-// the provider did since the last as thinking, or a heartbeat when it has been
-// quiet. An interrupted turn (Esc, or TaskStop on the agent) cancels the run,
-// including one interrupted before the wait began.
-async function* followRun($, bin, runId, signal) {
+// followOwnRun watches a run the agent itself started. Interrupting the turn
+// (Esc, or TaskStop on the agent) cancels the run, including one interrupted
+// before the wait began.
+async function* followOwnRun($, bin, runId, signal) {
   const cancel = () => {
     $.process.run([bin, 'cancel', runId]).catch(() => {})
   }
@@ -518,37 +521,45 @@ async function* followRun($, bin, runId, signal) {
 
   signal.addEventListener('abort', cancel, { once: true })
   try {
-    const startedAt = await $.clock.now()
-    let shownAt = startedAt
-    let from = 0
-    let reply
-    do {
-      reply = await $.process.run(sliceWaitCommand(bin, runId), { timeoutMs: SLICE_TIMEOUT_MS })
-      const lines = await newProgress($, bin, runId, from)
-      from = lines.next
-      for (const line of lines.text) yield thinking(line)
-
-      const now = await $.clock.now()
-      if (lines.text.length > 0) shownAt = now
-      else if (now - shownAt >= HEARTBEAT_MS) {
-        yield thinking(heartbeatLine(now - startedAt))
-        shownAt = now
-      }
-    } while (isWaitTimeout(reply) && !signal.aborted)
+    yield* watchRun($, bin, runId, signal)
   } finally {
     signal.removeEventListener('abort', cancel)
   }
 }
 
-// newProgress reads the run's progress entries from `from` on. A read that
-// fails shows nothing new, leaves `from` where it was and is logged once per
-// run: the wait goes on, and the answer does not depend on progress.
+// watchRun waits for the run in short slices and, after each, streams what the
+// provider did since the last as thinking, or a heartbeat when it has been
+// quiet, until the run ends or the turn is interrupted. It never stops the run.
+async function* watchRun($, bin, runId, signal) {
+  const startedAt = await $.clock.now()
+  let shownAt = startedAt
+  let from = 0
+  let reply
+  do {
+    reply = await $.process.run(sliceWaitCommand(bin, runId), { timeoutMs: SLICE_TIMEOUT_MS })
+    const lines = await newProgress($, bin, runId, from)
+    from = lines.next
+    for (const line of lines.text) yield thinking(line)
+
+    const now = await $.clock.now()
+    if (lines.text.length > 0) shownAt = now
+    else if (now - shownAt >= HEARTBEAT_MS) {
+      yield thinking(heartbeatLine(now - startedAt))
+      shownAt = now
+    }
+  } while (isWaitTimeout(reply) && !signal.aborted)
+}
+
+// newProgress reads the run's progress entries from `from` on, and the run's
+// state. A read that fails shows nothing new, leaves `from` where it was and is
+// logged once per run: the wait goes on, and the answer does not depend on
+// progress.
 async function newProgress($, bin, runId, from) {
   let failure
   try {
     const reply = await $.process.run(progressCommand(bin, runId, from))
     const progress = reply.exitCode === 0 ? readProgress(reply.stdout) : null
-    if (progress !== null) return { next: progress.next, text: progress.entries.map(progressLine) }
+    if (progress !== null) return { next: progress.next, text: progress.entries.map(progressLine), state: progress.state }
     failure = failureText(reply)
   } catch (error) {
     failure = messageOf(error)
@@ -558,7 +569,7 @@ async function newProgress($, bin, runId, from) {
     loggedProgressFailures.add(runId)
     $.ui.log('could not read the progress of run ' + runId + ': ' + failure, { to: 'debug' })
   }
-  return { next: from, text: [] }
+  return { next: from, text: [], state: null }
 }
 
 async function finalAnswer($, bin, runId) {
