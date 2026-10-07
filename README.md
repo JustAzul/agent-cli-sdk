@@ -1,7 +1,7 @@
-# agent-cli-sdk
+# agentcli
 
-[![ci](https://github.com/JustAzul/agent-cli-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/JustAzul/agent-cli-sdk/actions/workflows/ci.yml)
-[![dist](https://github.com/JustAzul/agent-cli-sdk/actions/workflows/dist.yml/badge.svg)](https://github.com/JustAzul/agent-cli-sdk/actions/workflows/dist.yml)
+[![ci](https://github.com/JustAzul/agentcli/actions/workflows/ci.yml/badge.svg)](https://github.com/JustAzul/agentcli/actions/workflows/ci.yml)
+[![dist](https://github.com/JustAzul/agentcli/actions/workflows/dist.yml/badge.svg)](https://github.com/JustAzul/agentcli/actions/workflows/dist.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **`agentcli` is one command-line interface for driving agent CLIs from Claude
@@ -34,8 +34,8 @@ CLI itself.
 ## Install
 
 ```sh
-claude plugin marketplace add JustAzul/agent-cli-sdk
-claude plugin install agent-cli@agent-cli-sdk
+claude plugin marketplace add JustAzul/agentcli
+claude plugin install agentcli@agentcli
 ```
 
 The plugin puts `agentcli` on the PATH of Claude's Bash tool. Its
@@ -48,6 +48,51 @@ directories once a day (see [Retention](#retention)).
 Requirements:
 - the provider CLI on `PATH` and logged in (`codex` for the Codex provider);
 - Linux or macOS on amd64 or arm64.
+
+### Update
+
+```sh
+claude plugin marketplace update agentcli
+claude plugin update agentcli@agentcli
+```
+
+Restart Claude Code to load the new version. The launcher follows it at the
+next session start.
+
+### Moving from agent-cli-sdk
+
+The project was called `agent-cli-sdk`, its plugin `agent-cli`. Remove the old
+plugin and its marketplace, then install as above:
+
+```sh
+claude plugin uninstall agent-cli@agent-cli-sdk
+claude plugin marketplace remove agent-cli-sdk
+```
+
+The binary, the `AGENTCLI_*` variables and the state directory keep their
+names, so runs, conversations and telemetry carry over, and the launcher
+points at the new plugin from the next session start. What changes is how
+Claude Code names the plugin's parts: tools are `mcp__agentcli__*`, agent
+types `agentcli:<scenario>`, the skill `agentcli:dispatch` and the command
+`/agentcli-jobs`.
+
+### Uninstall
+
+```sh
+claude plugin uninstall agentcli@agentcli
+claude plugin marketplace remove agentcli
+rm ~/.local/bin/agentcli
+```
+
+Runs and telemetry stay in `~/.local/state/agentcli` (or `$AGENTCLI_HOME`, or
+`$XDG_STATE_HOME/agentcli`) until you delete it.
+
+### Build from source
+
+Everything builds in a pinned Go container, so the host needs only Docker (see
+[How it is built](#how-it-is-built)). `make dist` writes the complete plugin,
+binaries included, to `dist/`; `claude --plugin-dir dist` loads it for one
+session.
 
 ## Quick start
 
@@ -192,7 +237,7 @@ The **skill** teaches Claude:
 - to quote the other agent's findings with attribution, and to disagree openly
   when it disagrees.
 
-The **mod** registers one agent type per scenario, `agent-cli:second-opinion`,
+The **mod** registers one agent type per scenario, `agentcli:second-opinion`,
 `:code-review`, `:cross-check`, `:expert-persona`, `:delegation` and `:adhoc`.
 Claude dispatches through the Agent tool, and the run behaves like any
 background agent:
@@ -206,7 +251,7 @@ No Claude model runs inside these agents: the mod answers each of their
 requests with an agentcli job. A dispatch that fails says so in its answer
 instead of falling back to a Claude reply. The types are offered to Claude only
 once the dispatch skill has loaded in the session, so it does not reach for
-another agent unasked. `agent-cli:code-review` takes its target as the whole
+another agent unasked. `agentcli:code-review` takes its target as the whole
 prompt: `uncommitted`, `base <branch>` or `commit <sha>`.
 
 The mod also adds three tools that start background jobs, for overrides the
@@ -214,9 +259,9 @@ agent types do not carry:
 
 | Tool | Does |
 |---|---|
-| `mcp__agent-cli__ask` | starts a conversation (`prompt`, plus optional `provider`, `scenario`, `model`, `effort`, `sandbox`, `cwd`) |
-| `mcp__agent-cli__send` | continues one (`conversation_id`, `prompt`) |
-| `mcp__agent-cli__jobs` | `list`, `status`, `result` or `cancel` |
+| `mcp__agentcli__ask` | starts a conversation (`prompt`, plus optional `provider`, `scenario`, `model`, `effort`, `sandbox`, `cwd`) |
+| `mcp__agentcli__send` | continues one (`conversation_id`, `prompt`) |
+| `mcp__agentcli__jobs` | `list`, `status`, `result` or `cancel` |
 
 When a job started through these tools finishes, the mod shows a toast and
 hands Claude a notice with the outcome and the output (inline up to 8 KiB).
@@ -228,7 +273,7 @@ gone once it ends. Only you see the band: nothing about the run reaches
 Claude, and the caller that started it delivers its result.
 
 The status line counts the session's running jobs and its Codex token use
-(`Codex 1.4M in · 7.2k out`). `/agent-cli-jobs` lists the session's jobs at
+(`Codex 1.4M in · 7.2k out`). `/agentcli-jobs` lists the session's jobs at
 once, even while Claude is working.
 
 ## Using it from hooks and scripts

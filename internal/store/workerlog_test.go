@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/store"
+	"github.com/JustAzul/agentcli/internal/store"
 )
 
 func TestOpenWorkerLogCreatesAUserOnlyFile(t *testing.T) {

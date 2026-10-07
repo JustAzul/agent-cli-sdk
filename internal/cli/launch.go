@@ -8,8 +8,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/runner"
-	"github.com/JustAzul/agent-cli-sdk/internal/store"
+	"github.com/JustAzul/agentcli/internal/runner"
+	"github.com/JustAzul/agentcli/internal/store"
 )
 
 const (

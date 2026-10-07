@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/telemetry"
+	"github.com/JustAzul/agentcli/internal/telemetry"
 )
 
 func init() {

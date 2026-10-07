@@ -13,7 +13,7 @@ import (
 	"time"
 
 	// Provider adapters register themselves from init().
-	_ "github.com/JustAzul/agent-cli-sdk/internal/provider/codex"
+	_ "github.com/JustAzul/agentcli/internal/provider/codex"
 )
 
 // Context is what a command sees of its process.

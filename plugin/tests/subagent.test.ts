@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import { SESSION, isShim, ok, step, world } from './kit'
 
 const START = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
-const HANDOFF_FAILED = 'agent-cli: the hand-off to the agent failed, so this is not its answer.'
+const HANDOFF_FAILED = 'agentcli: the hand-off to the agent failed, so this is not its answer.'
 const TYPES = ['adhoc', 'code-review', 'cross-check', 'delegation', 'expert-persona', 'second-opinion']
 const JOB_FLAGS = ['--background', '--json', '--source', 'agent', '--session-id', SESSION]
 
@@ -54,23 +54,23 @@ test('the mod registers one background agent type per scenario, only for when th
 test('the agent types are hidden from the model until the dispatch skill loads in the session', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
-  const offer = (agent: string) => $.agent.offer({ agent, description: '', source: 'plugin', provider: { plugin: 'agent-cli', tier: 'user' } } as any)
+  const offer = (agent: string) => $.agent.offer({ agent, description: '', source: 'plugin', provider: { plugin: 'agentcli', tier: 'user' } } as any)
 
-  expect(await offer('agent-cli:delegation')).toEqual({ isOffered: false })
+  expect(await offer('agentcli:delegation')).toEqual({ isOffered: false })
   expect(await offer('Explore')).toEqual({ isOffered: true })
 
-  await $.skill.prompt({ skill: 'agent-cli:other', text: '' })
-  expect(await offer('agent-cli:delegation')).toEqual({ isOffered: false })
+  await $.skill.prompt({ skill: 'agentcli:other', text: '' })
+  expect(await offer('agentcli:delegation')).toEqual({ isOffered: false })
 
-  await $.skill.prompt({ skill: 'agent-cli:dispatch', text: 'Dispatch' })
-  expect(await offer('agent-cli:delegation')).toEqual({ isOffered: true })
+  await $.skill.prompt({ skill: 'agentcli:dispatch', text: 'Dispatch' })
+  expect(await offer('agentcli:delegation')).toEqual({ isOffered: true })
   expect(w.runs).toEqual([])
 })
 
 test('a subagent of an agent type is answered by an agentcli job, never by the model', async ($, on) => {
   const w = world(on)
   w.respond = codex('Codex says the cache is safe.\n')
-  subagent(w, 'ag-1', 'agent-cli:second-opinion', [{ role: 'user', text: 'Is a TTL cache safe here?' }])
+  subagent(w, 'ag-1', 'agentcli:second-opinion', [{ role: 'user', text: 'Is a TTL cache safe here?' }])
   await $.session.start(START)
 
   const out = await step($, 'ag-1')
@@ -106,7 +106,7 @@ test('model requests of the main loop and of other agents reach the model untouc
 test('reminders the engine adds to the prompt are not sent to the agent', async ($, on) => {
   const w = world(on)
   w.respond = codex('done')
-  subagent(w, 'ag-1', 'agent-cli:adhoc', [
+  subagent(w, 'ag-1', 'agentcli:adhoc', [
     { role: 'user', text: '<system-reminder>\nsession context\n</system-reminder>\nSummarize README.md' },
   ])
   await $.session.start(START)
@@ -119,7 +119,7 @@ test('reminders the engine adds to the prompt are not sent to the agent', async 
 test('a SendMessage to the subagent continues its agentcli conversation', async ($, on) => {
   const w = world(on)
   w.respond = codex('First answer.')
-  subagent(w, 'ag-1', 'agent-cli:cross-check', [{ role: 'user', text: 'Check auth.go' }])
+  subagent(w, 'ag-1', 'agentcli:cross-check', [{ role: 'user', text: 'Check auth.go' }])
   await $.session.start(START)
   await step($, 'ag-1')
 
@@ -139,7 +139,7 @@ test('a SendMessage to the subagent continues its agentcli conversation', async 
 
 test('a later turn whose conversation is not recorded is refused, not started afresh', async ($, on) => {
   const w = world(on)
-  subagent(w, 'ag-1', 'agent-cli:adhoc', [
+  subagent(w, 'ag-1', 'agentcli:adhoc', [
     { role: 'user', text: 'hi' },
     { role: 'assistant', text: 'hello' },
     { role: 'user', text: 'and now?' },
@@ -157,8 +157,8 @@ test('a later turn whose conversation is not recorded is refused, not started af
 test('a code-review subagent reads its prompt as the review target', async ($, on) => {
   const w = world(on)
   w.respond = codex('[P2] auth.go:12 token not checked')
-  subagent(w, 'ag-1', 'agent-cli:code-review', [{ role: 'user', text: 'base feature/login' }])
-  subagent(w, 'ag-2', 'agent-cli:code-review', [{ role: 'user', text: ' uncommitted ' }])
+  subagent(w, 'ag-1', 'agentcli:code-review', [{ role: 'user', text: 'base feature/login' }])
+  subagent(w, 'ag-2', 'agentcli:code-review', [{ role: 'user', text: ' uncommitted ' }])
   await $.session.start(START)
 
   await step($, 'ag-1')
@@ -175,7 +175,7 @@ test('a code-review subagent reads its prompt as the review target', async ($, o
 test('a code-review prompt that is not exactly one target is refused before agentcli runs', async ($, on) => {
   const w = world(on)
   for (const [id, text] of [['a', 'please review my changes'], ['b', 'base -rf'], ['c', 'commit']]) {
-    subagent(w, id, 'agent-cli:code-review', [{ role: 'user', text }])
+    subagent(w, id, 'agentcli:code-review', [{ role: 'user', text }])
   }
   await $.session.start(START)
 
@@ -191,8 +191,8 @@ test('a code-review prompt that is not exactly one target is refused before agen
 test('an agentcli failure becomes an answer that says the hand-off failed', async ($, on) => {
   const w = world(on)
   w.respond = () => ({ exitCode: 3, stdout: JSON.stringify({ sdk_status: 'conversation_busy', exit_code: 3, error: 'conversation c-1 has an active turn' }), stderr: '' })
-  subagent(w, 'ag-1', 'agent-cli:delegation', [{ role: 'user', text: 'Rename foo to bar in util.go' }])
-  subagent(w, 'ag-2', 'agent-cli:delegation', [{ role: 'user', text: 'Rename foo to bar in util.go' }])
+  subagent(w, 'ag-1', 'agentcli:delegation', [{ role: 'user', text: 'Rename foo to bar in util.go' }])
+  subagent(w, 'ag-2', 'agentcli:delegation', [{ role: 'user', text: 'Rename foo to bar in util.go' }])
   await $.session.start(START)
 
   const refused = await step($, 'ag-1')
@@ -218,7 +218,7 @@ test('a run is waited for in short slices until it finishes', async ($, on) => {
     waits += 1
     return waits < 3 ? { exitCode: 5, stdout: JSON.stringify({ sdk_status: 'wait_timeout', exit_code: 5, error: 'run run-1 is still running after 9m0s' }), stderr: '' } : finished()
   }
-  subagent(w, 'ag-1', 'agent-cli:adhoc', [{ role: 'user', text: 'slow one' }])
+  subagent(w, 'ag-1', 'agentcli:adhoc', [{ role: 'user', text: 'slow one' }])
   await $.session.start(START)
 
   const out = await step($, 'ag-1')
@@ -231,7 +231,7 @@ test('a run is waited for in short slices until it finishes', async ($, on) => {
 test('a run that did not deliver leads its answer with how it ended', async ($, on) => {
   const w = world(on)
   w.respond = codex('', { state: 'timeout', outcome: 'timeout', error_excerpt: 'stream disconnected' })
-  subagent(w, 'ag-1', 'agent-cli:adhoc', [{ role: 'user', text: 'q' }])
+  subagent(w, 'ag-1', 'agentcli:adhoc', [{ role: 'user', text: 'q' }])
   await $.session.start(START)
 
   const out = await step($, 'ag-1')
@@ -243,7 +243,7 @@ test('a run that did not deliver leads its answer with how it ended', async ($, 
 test('output over 64 KiB is cut and the answer names the output file', async ($, on) => {
   const w = world(on)
   w.respond = codex('x'.repeat(70000))
-  subagent(w, 'ag-1', 'agent-cli:adhoc', [{ role: 'user', text: 'q' }])
+  subagent(w, 'ag-1', 'agentcli:adhoc', [{ role: 'user', text: 'q' }])
   await $.session.start(START)
 
   const out = await step($, 'ag-1')
@@ -262,8 +262,8 @@ test('the conversations of two subagents are both recorded', async ($, on) => {
     }
     return codex('ok')(argv)
   }
-  subagent(w, 'ag-1', 'agent-cli:adhoc', [{ role: 'user', text: 'one' }])
-  subagent(w, 'ag-2', 'agent-cli:adhoc', [{ role: 'user', text: 'two' }])
+  subagent(w, 'ag-1', 'agentcli:adhoc', [{ role: 'user', text: 'one' }])
+  subagent(w, 'ag-2', 'agentcli:adhoc', [{ role: 'user', text: 'two' }])
   await $.session.start(START)
 
   await Promise.all([step($, 'ag-1'), step($, 'ag-2')])
@@ -274,9 +274,9 @@ test('the conversations of two subagents are both recorded', async ($, on) => {
   ])
 })
 
-test('tool calls made inside an agent-cli subagent are refused', async ($, on) => {
+test('tool calls made inside an agentcli subagent are refused', async ($, on) => {
   const w = world(on)
-  subagent(w, 'ag-1', 'agent-cli:delegation', [{ role: 'user', text: 'q' }])
+  subagent(w, 'ag-1', 'agentcli:delegation', [{ role: 'user', text: 'q' }])
   subagent(w, 'ag-x', 'Explore', [{ role: 'user', text: 'q' }])
   await $.session.start(START)
 
@@ -284,7 +284,7 @@ test('tool calls made inside an agent-cli subagent are refused', async ($, on) =
   const other: any = await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'ag-x' } as any)
   const main: any = await $.tool.call({ tool: 'Bash', command: 'ls' } as any)
 
-  expect(inside.deny).toContain('agent-cli agents run no tools')
+  expect(inside.deny).toContain('agentcli agents run no tools')
   expect(other.result).toBe('unanswered')
   expect(main.result).toBe('unanswered')
 })
@@ -293,7 +293,7 @@ test('a run that ended with exit code 5 is not waited for again', async ($, on) 
   const w = world(on)
   const answers = codex('', { state: 'failed', outcome: 'error', error_excerpt: 'provider exited 5' })
   w.respond = (argv) => (argv[1] === 'wait' ? { ...finished({ state: 'failed', outcome: 'error' }), exitCode: 5 } : answers(argv))
-  subagent(w, 'ag-1', 'agent-cli:adhoc', [{ role: 'user', text: 'q' }])
+  subagent(w, 'ag-1', 'agentcli:adhoc', [{ role: 'user', text: 'q' }])
   await $.session.start(START)
 
   const out = await step($, 'ag-1')
@@ -306,7 +306,7 @@ test('an output that cannot be read is a hand-off failure, not an empty answer',
   const w = world(on)
   const answers = codex('')
   w.respond = (argv) => (argv[1] === 'result' ? { exitCode: 70, stdout: '', stderr: 'agentcli: reading output: permission denied\n' } : answers(argv))
-  subagent(w, 'ag-1', 'agent-cli:adhoc', [{ role: 'user', text: 'q' }])
+  subagent(w, 'ag-1', 'agentcli:adhoc', [{ role: 'user', text: 'q' }])
   await $.session.start(START)
 
   const out = await step($, 'ag-1')

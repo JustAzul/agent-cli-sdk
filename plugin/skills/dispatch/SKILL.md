@@ -43,8 +43,8 @@ Load only the reference for the chosen scenario. A user override always wins
 ## Agent types, mod tools or CLI
 
 With the plugin loaded, dispatch through the **agent types**, one per scenario:
-`agent-cli:second-opinion`, `agent-cli:code-review`, `agent-cli:cross-check`,
-`agent-cli:expert-persona`, `agent-cli:delegation` and `agent-cli:adhoc`. Call
+`agentcli:second-opinion`, `agentcli:code-review`, `agentcli:cross-check`,
+`agentcli:expert-persona`, `agentcli:delegation` and `agentcli:adhoc`. Call
 the Agent tool with `subagent_type` set to one, a short `description` and the
 self-contained `prompt`. Each runs its scenario's profile as an agentcli job and
 shows as a native background agent: its row streams what the agent is doing,
@@ -52,30 +52,30 @@ and the completion notification carries the output (cut at 64 KiB) ending in
 `[agentcli run <run_id> · conversation <conversation_id> · <outcome>]`.
 
 - The types are offered only once this skill has loaded in the session.
-- `agent-cli:code-review` takes the review target as its whole prompt:
+- `agentcli:code-review` takes the review target as its whole prompt:
   `uncommitted`, `base <branch>` or `commit <sha>`.
 - A follow-up is a SendMessage to the agent; it continues the same
   conversation. If the agent answers that its conversation is no longer
   recorded, continue with the `send` tool and the conversation id from the
   trailer.
 - Stopping the agent (TaskStop) cancels its run.
-- An answer that starts with `agent-cli: the hand-off to the agent failed` is
+- An answer that starts with `agentcli: the hand-off to the agent failed` is
   not the other agent's answer: report it as a failed dispatch, never as its
   opinion.
 
 The mod also gives three tools, for what the agent types do not carry (a
 model, effort or sandbox override, another provider). By contract:
 
-- `mcp__agent-cli__ask`: `prompt` required; optional `provider`, `scenario`,
+- `mcp__agentcli__ask`: `prompt` required; optional `provider`, `scenario`,
   `model`, `effort`, `sandbox`, `cwd`. Always admits a job and returns
   `{conversation_id, run_id}`.
-- `mcp__agent-cli__send`: `conversation_id` and `prompt` required, plus the same
+- `mcp__agentcli__send`: `conversation_id` and `prompt` required, plus the same
   optional fields. Always admits a job.
-- `mcp__agent-cli__jobs`: `action` is `list`, `status`, `result` or `cancel`;
+- `mcp__agentcli__jobs`: `action` is `list`, `status`, `result` or `cancel`;
   `run_id` is required except for `list`.
 
 A job started with `ask` or `send` posts a notice in the session
-(`agent-cli job <run_id> (<scenario>, conversation <conversation_id>) finished: <outcome>`)
+(`agentcli job <run_id> (<scenario>, conversation <conversation_id>) finished: <outcome>`)
 with the output inline when it is at most 8 KiB, otherwise its first 8 KiB plus
 the output path. Nothing to poll: launch, keep working, read the notice.
 

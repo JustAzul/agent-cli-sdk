@@ -4,10 +4,10 @@ import (
 	"errors"
 	"io"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/profile"
-	"github.com/JustAzul/agent-cli-sdk/internal/provider"
-	"github.com/JustAzul/agent-cli-sdk/internal/runner"
-	"github.com/JustAzul/agent-cli-sdk/internal/store"
+	"github.com/JustAzul/agentcli/internal/profile"
+	"github.com/JustAzul/agentcli/internal/provider"
+	"github.com/JustAzul/agentcli/internal/runner"
+	"github.com/JustAzul/agentcli/internal/store"
 )
 
 // turn is one fully validated provider turn, ready to plan, admit and run.

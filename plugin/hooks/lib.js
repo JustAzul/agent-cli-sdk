@@ -1,4 +1,4 @@
-// Pure helpers for the agent-cli mod. Nothing here touches the mods API: every
+// Pure helpers for the agentcli mod. Nothing here touches the mods API: every
 // call that reaches Claude Code lives in register.js, so these functions can be
 // read and tested on their own.
 
@@ -168,7 +168,7 @@ export function cutBytes(text, limit) {
 
 export function noticeText(job, output) {
   const outcome = job.outcome ?? job.state
-  const head = 'agent-cli job ' + job.run_id + ' (' + job.scenario + ', conversation ' + job.conversation_id + ') finished: ' + outcome
+  const head = 'agentcli job ' + job.run_id + ' (' + job.scenario + ', conversation ' + job.conversation_id + ') finished: ' + outcome
   if (output === null) {
     return head + '\n\nThe output could not be read; it is at ' + job.output_path
   }
@@ -187,7 +187,7 @@ export function resultNote(outputPath) {
   return outputPath ? '[output cut at 64 KiB; full output at ' + outputPath + ']' : '[output cut at 64 KiB]'
 }
 
-// jobsListing is what /agent-cli-jobs prints.
+// jobsListing is what /agentcli-jobs prints.
 export function jobsListing(jobs) {
   if (jobs.length === 0) return 'No jobs in this session.'
   const lines = jobs.map((job) => [job.run_id, job.state, job.scenario, 'conversation ' + job.conversation_id].join('  '))

@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/provider"
+	"github.com/JustAzul/agentcli/internal/provider"
 )
 
 // Version is the record schema version.

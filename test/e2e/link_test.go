@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const pluginKey = "agent-cli@agent-cli-sdk"
+const pluginKey = "agentcli@agentcli"
 
 // linkWorld is one isolated HOME with a Claude plugins root and a launcher dir.
 type linkWorld struct {
@@ -424,7 +424,7 @@ func TestLauncherAfterUninstallExits127(t *testing.T) {
 	if r.code != 127 {
 		t.Errorf("exit %d, want 127", r.code)
 	}
-	if !strings.Contains(r.stderr, "agent-cli plugin is not installed") || !strings.Contains(r.stderr, install) {
+	if !strings.Contains(r.stderr, "agentcli plugin is not installed") || !strings.Contains(r.stderr, install) {
 		t.Errorf("stderr = %q", r.stderr)
 	}
 }

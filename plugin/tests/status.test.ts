@@ -76,7 +76,7 @@ test('a failing poll does not stop the next one', async ($, on) => {
   expect(w.submits.length).toBe(1)
 })
 
-test('/agent-cli-jobs is registered to run mid-turn and prints the recent jobs at once', async ($, on) => {
+test('/agentcli-jobs is registered to run mid-turn and prints the recent jobs at once', async ($, on) => {
   const w = world(on)
   w.respond = () =>
     listing(
@@ -86,28 +86,28 @@ test('/agent-cli-jobs is registered to run mid-turn and prints the recent jobs a
     )
   await $.session.start(START)
 
-  const spec = w.commands.find((c) => c.name === 'agent-cli-jobs')
+  const spec = w.commands.find((c) => c.name === 'agentcli-jobs')
   expect(spec).toBeDefined()
   expect(spec.immediate).toBe(true)
   expect(spec.description.length).toBeGreaterThan(0)
 
-  const out: any = await $.command.run({ command: 'agent-cli-jobs', args: '' })
+  const out: any = await $.command.run({ command: 'agentcli-jobs', args: '' })
 
   expect(w.runs[0]!.argv.slice(1)).toEqual(['status', '--json', '--session-id', SESSION])
   for (const part of ['run-2', 'running', 'code-review', 'conv-9', 'run-1', 'done']) expect(out.text).toContain(part)
   expect(out.text).not.toContain('fg')
 })
 
-test('/agent-cli-jobs says so when the session has no jobs, and reports agentcli failures', async ($, on) => {
+test('/agentcli-jobs says so when the session has no jobs, and reports agentcli failures', async ($, on) => {
   const w = world(on)
   w.respond = () => listing()
   await $.session.start(START)
 
-  const none: any = await $.command.run({ command: 'agent-cli-jobs', args: '' })
+  const none: any = await $.command.run({ command: 'agentcli-jobs', args: '' })
   expect(none.text).toContain('No')
 
   w.respond = () => ({ exitCode: 70, stdout: '', stderr: 'agentcli: cannot resolve the home\n' })
-  const failed: any = await $.command.run({ command: 'agent-cli-jobs', args: '' })
+  const failed: any = await $.command.run({ command: 'agentcli-jobs', args: '' })
   expect(failed.text).toContain('cannot resolve the home')
 })
 

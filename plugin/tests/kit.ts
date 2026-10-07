@@ -5,7 +5,7 @@ import { mock } from 'claude-code/testing'
 export const SESSION = 'sess-1'
 // The mod runs the plugin's own shim: an absolute path ending in bin/agentcli.
 export const isShim = (p: string) => p.startsWith('/') && p.endsWith('/bin/agentcli')
-export const TOOL = (name: string) => `mcp__agent-cli__${name}`
+export const TOOL = (name: string) => `mcp__agentcli__${name}`
 
 export type Run = { argv: string[]; stdin?: string; cwd?: string }
 export type Reply = { exitCode: number; stdout: string; stderr: string }
@@ -66,7 +66,7 @@ export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
   on('session.id', () => ({ value: w.sessionId }))
   on('tool.register', (_$: any, e: any) => {
     w.tools.push(e)
-    return { value: { tool: 'mcp__agent-cli__' + e.name } }
+    return { value: { tool: 'mcp__agentcli__' + e.name } }
   })
   on('command.register', (_$: any, e: any) => {
     if (w.refuseCommand) return { deny: '"/' + e.name + '" refused: it is the built-in /' + e.name }
@@ -106,7 +106,7 @@ export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
   })
   on('agent.register', (_$: any, e: any) => {
     w.agentTypes.push(e)
-    return { value: { agent: 'agent-cli:' + e.name } }
+    return { value: { agent: 'agentcli:' + e.name } }
   })
   on('agent.list', () => ({ value: w.agents.map((a) => ({ ...a, description: '', status: 'running' })) }))
   on('agent.spawn', (_$: any, e: any) => {

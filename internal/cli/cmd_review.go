@@ -3,9 +3,9 @@ package cli
 import (
 	"flag"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/profile"
-	"github.com/JustAzul/agent-cli-sdk/internal/provider"
-	"github.com/JustAzul/agent-cli-sdk/internal/store"
+	"github.com/JustAzul/agentcli/internal/profile"
+	"github.com/JustAzul/agentcli/internal/provider"
+	"github.com/JustAzul/agentcli/internal/store"
 )
 
 func init() {

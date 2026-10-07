@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/store"
-	"github.com/JustAzul/agent-cli-sdk/internal/telemetry"
+	"github.com/JustAzul/agentcli/internal/store"
+	"github.com/JustAzul/agentcli/internal/telemetry"
 )
 
 func init() {

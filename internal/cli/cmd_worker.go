@@ -5,9 +5,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/provider"
-	"github.com/JustAzul/agent-cli-sdk/internal/runner"
-	"github.com/JustAzul/agent-cli-sdk/internal/store"
+	"github.com/JustAzul/agentcli/internal/provider"
+	"github.com/JustAzul/agentcli/internal/runner"
+	"github.com/JustAzul/agentcli/internal/store"
 )
 
 // workerCommand is the internal entry point a job's detached worker runs.

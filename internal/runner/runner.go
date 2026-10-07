@@ -17,9 +17,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/provider"
-	"github.com/JustAzul/agent-cli-sdk/internal/store"
-	"github.com/JustAzul/agent-cli-sdk/internal/telemetry"
+	"github.com/JustAzul/agentcli/internal/provider"
+	"github.com/JustAzul/agentcli/internal/store"
+	"github.com/JustAzul/agentcli/internal/telemetry"
 )
 
 const stderrTailBytes = 64 * 1024

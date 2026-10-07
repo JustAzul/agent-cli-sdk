@@ -11,7 +11,7 @@ agentcli exec --scenario second-opinion --background --json - <<'PROMPT'
 PROMPT
 ```
 
-Mod: `mcp__agent-cli__ask` with `scenario: "second-opinion"` and the same prompt.
+Mod: `mcp__agentcli__ask` with `scenario: "second-opinion"` and the same prompt.
 
 ## Prompt template
 

@@ -4,10 +4,10 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/provider"
-	"github.com/JustAzul/agent-cli-sdk/internal/runner"
-	"github.com/JustAzul/agent-cli-sdk/internal/store"
-	"github.com/JustAzul/agent-cli-sdk/internal/telemetry"
+	"github.com/JustAzul/agentcli/internal/provider"
+	"github.com/JustAzul/agentcli/internal/runner"
+	"github.com/JustAzul/agentcli/internal/store"
+	"github.com/JustAzul/agentcli/internal/telemetry"
 )
 
 // buildJob assembles the runner job of an admitted run from its resolved

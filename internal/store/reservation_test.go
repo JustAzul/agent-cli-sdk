@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/store"
+	"github.com/JustAzul/agentcli/internal/store"
 )
 
 var reserveAt = time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)

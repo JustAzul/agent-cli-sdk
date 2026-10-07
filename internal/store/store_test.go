@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/store"
+	"github.com/JustAzul/agentcli/internal/store"
 )
 
 func TestResolveHome(t *testing.T) {

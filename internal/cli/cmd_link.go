@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/link"
-	"github.com/JustAzul/agent-cli-sdk/internal/version"
+	"github.com/JustAzul/agentcli/internal/link"
+	"github.com/JustAzul/agentcli/internal/version"
 )
 
 func init() {

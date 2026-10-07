@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/runner"
+	"github.com/JustAzul/agentcli/internal/runner"
 )
 
 func envOf(m map[string]string) func(string) string { return func(k string) string { return m[k] } }

@@ -33,7 +33,7 @@ test('what the run does streams into the agent row as thinking, then the answer'
     if (argv[1] === 'status') return finishedRun()
     return ok('Codex: the token is never checked.')
   }
-  w.agents.push({ id: 'ag-1', type: 'agent-cli:second-opinion' })
+  w.agents.push({ id: 'ag-1', type: 'agentcli:second-opinion' })
   w.messages['ag-1'] = [{ role: 'user', text: 'Is auth.go safe?' }]
   await $.session.start(START)
 
@@ -80,13 +80,13 @@ test('a run another caller flagged shows in the band with its latest step until 
 
   // The agent types' own runs show as their agents, and an unflagged run not at all.
   for (const surface of ['desktop', 'vscode', 'mobile'] as const) {
-    const elsewhere = await $.ui.mount({ plugin: 'agent-cli', surface, component: 'AbovePrompt', props: BAND_PROPS })
+    const elsewhere = await $.ui.mount({ plugin: 'agentcli', surface, component: 'AbovePrompt', props: BAND_PROPS })
     expect((await elsewhere.findAll({ type: 'Text' })).map((t) => t.text)).toEqual(['agentcli · code-review · hook-post-commit · 15s · $ rg -n token auth.go'])
   }
-  const band = await $.ui.mount({ plugin: 'agent-cli', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS })
+  const band = await $.ui.mount({ plugin: 'agentcli', surface: 'terminal', component: 'AbovePrompt', props: BAND_PROPS })
   expect((await band.findAll({ type: 'Text' })).map((t) => t.text)).toEqual(['agentcli · code-review · hook-post-commit · 15s · $ rg -n token auth.go'])
   // A survey holding the band stays, under the line.
-  const withSurvey = await $.ui.mount({ plugin: 'agent-cli', surface: 'terminal', component: 'AbovePrompt', props: { ...BAND_PROPS, hasSurvey: true } })
+  const withSurvey = await $.ui.mount({ plugin: 'agentcli', surface: 'terminal', component: 'AbovePrompt', props: { ...BAND_PROPS, hasSurvey: true } })
   expect((await withSurvey.findAll({ type: 'Text' })).map((t) => t.text)).toEqual([
     'agentcli · code-review · hook-post-commit · 15s · $ rg -n token auth.go',
     'How is Claude doing this session?',
@@ -107,7 +107,7 @@ test('a run another caller flagged shows in the band with its latest step until 
 test('after a reload the band keeps what it showed until the first poll has read the runs', async ($, on) => {
   const w = world(on)
   const writes: unknown[] = []
-  on('state.set', { plugin: 'agent-cli', key: 'hookRuns' }, (_$: any, e: any) => {
+  on('state.set', { plugin: 'agentcli', key: 'hookRuns' }, (_$: any, e: any) => {
     writes.push(e.value)
     return { isSet: true, version: writes.length }
   })
@@ -124,7 +124,7 @@ test('after a reload the band keeps what it showed until the first poll has read
 test('a band that cannot be written is logged once and written again on the next refresh', async ($, on) => {
   const w = world(on)
   let attempts = 0
-  on('state.set', { plugin: 'agent-cli', key: 'hookRuns' }, () => {
+  on('state.set', { plugin: 'agentcli', key: 'hookRuns' }, () => {
     attempts += 1
     return { deny: 'state host unavailable' }
   })
@@ -223,7 +223,7 @@ test('a progress read that fails leaves the run followed to its answer', async (
     if (argv[1] === 'status') return finishedRun()
     return ok('Codex answered anyway.')
   }
-  w.agents.push({ id: 'ag-1', type: 'agent-cli:adhoc' })
+  w.agents.push({ id: 'ag-1', type: 'agentcli:adhoc' })
   w.messages['ag-1'] = [{ role: 'user', text: 'q' }]
   await $.session.start(START)
 

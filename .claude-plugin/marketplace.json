@@ -1,5 +1,5 @@
 {
-  "name": "agent-cli-sdk",
+  "name": "agentcli",
   "owner": {
     "name": "JustAzul"
   },
@@ -8,11 +8,11 @@
   },
   "plugins": [
     {
-      "name": "agent-cli",
+      "name": "agentcli",
       "description": "agentcli: drive agent CLIs (Codex today) from Claude Code, hooks and scripts.",
       "source": {
         "source": "github",
-        "repo": "JustAzul/agent-cli-sdk",
+        "repo": "JustAzul/agentcli",
         "ref": "dist"
       }
     }

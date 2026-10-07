@@ -26,12 +26,12 @@ test('the mod registers its three tools with schemas the model can use', async (
   expect(spec.jobs.inputSchema.properties.run_id.type).toBe('string')
 })
 
-test('the mod registers exactly one command, /agent-cli-jobs, that runs mid-turn', async ($, on) => {
+test('the mod registers exactly one command, /agentcli-jobs, that runs mid-turn', async ($, on) => {
   const w = world(on)
   await $.session.start(START)
 
   expect(w.commands.length).toBe(1)
-  expect(w.commands[0]).toMatchObject({ name: 'agent-cli-jobs', immediate: true })
+  expect(w.commands[0]).toMatchObject({ name: 'agentcli-jobs', immediate: true })
 })
 
 test('starting the session twice registers the tools again without error', async ($, on) => {
@@ -50,7 +50,7 @@ test('a command that is refused is logged and does not stop the session from sta
 
   expect(w.tools.map((t) => t.name).sort()).toEqual(['ask', 'jobs', 'send'])
   expect(w.logs.length).toBe(1)
-  expect(w.logs[0]).toContain('agent-cli-jobs')
+  expect(w.logs[0]).toContain('agentcli-jobs')
   // The poll is running although the command was refused.
   await w.clock.advance(15000)
   expect(w.runs.length).toBe(1)

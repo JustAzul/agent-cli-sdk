@@ -37,7 +37,7 @@ func Render(target string, buildSeq int) ([]byte, error) {
 	fmt.Fprintf(&b, "build_seq=%d\n", buildSeq)
 	fmt.Fprintf(&b, "target='%s'\n", quoted)
 	b.WriteString("if [ ! -e \"$target\" ]; then\n")
-	b.WriteString("  echo \"agent-cli plugin is not installed (launcher target missing: $target)\" >&2\n")
+	b.WriteString("  echo \"agentcli plugin is not installed (launcher target missing: $target)\" >&2\n")
 	b.WriteString("  exit 127\n")
 	b.WriteString("fi\n")
 	b.WriteString("exec \"$target\" \"$@\"\n")

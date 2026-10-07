@@ -13,7 +13,7 @@ export const CONVERSATIONS_LIMIT = 500
 
 // The first line every failed hand-off answers with, so an answer that did not
 // come from the agent can never pass for one.
-export const HANDOFF_FAILED = 'agent-cli: the hand-off to the agent failed, so this is not its answer.'
+export const HANDOFF_FAILED = 'agentcli: the hand-off to the agent failed, so this is not its answer.'
 
 const DELIVERED_OUTCOMES = ['ok', 'clean']
 const REMINDER = /<system-reminder>[\s\S]*?<\/system-reminder>/g
@@ -179,7 +179,7 @@ export function handoffFailure(detail) {
 // is never started afresh, which would drop the context the follow-up needs.
 export const LOST_CONVERSATION =
   "this agent's agentcli conversation is no longer recorded, so its context cannot be resumed here. " +
-  "Continue it with the agent-cli send tool and the conversation id from an earlier answer's trailer."
+  "Continue it with the agentcli send tool and the conversation id from an earlier answer's trailer."
 
 // readConversations returns the persisted agentId → conversation records, or
 // an empty list when the stored value is missing or damaged.

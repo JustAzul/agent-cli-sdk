@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/runner"
+	"github.com/JustAzul/agentcli/internal/runner"
 )
 
 func TestForegroundRunIsVisibleToOtherShells(t *testing.T) {

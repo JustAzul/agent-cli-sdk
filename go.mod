@@ -1,4 +1,4 @@
-module github.com/JustAzul/agent-cli-sdk
+module github.com/JustAzul/agentcli
 
 go 1.27
 

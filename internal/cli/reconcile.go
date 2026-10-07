@@ -5,8 +5,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/runner"
-	"github.com/JustAzul/agent-cli-sdk/internal/store"
+	"github.com/JustAzul/agentcli/internal/runner"
+	"github.com/JustAzul/agentcli/internal/store"
 )
 
 // defaultQueuedGrace is how long a queued run may go without a worker holding

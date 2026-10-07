@@ -52,9 +52,9 @@ Stop and report back. Do not improvise; do not expand scope.
 PROMPT
 ```
 
-Mod: `mcp__agent-cli__ask` with `scenario: "delegation"` and `cwd`. A job running
+Mod: `mcp__agentcli__ask` with `scenario: "delegation"` and `cwd`. A job running
 far past its peers means the task was not mechanical: cancel it
-(`mcp__agent-cli__jobs` with `action: "cancel"`, or `agentcli cancel <run_id>`)
+(`mcp__agentcli__jobs` with `action: "cancel"`, or `agentcli cancel <run_id>`)
 and re-scope.
 
 ## After the run

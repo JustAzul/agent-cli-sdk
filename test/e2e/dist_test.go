@@ -67,7 +67,7 @@ func TestDistContent(t *testing.T) {
 	out := mustBuildDist(t, fixedEnv...)
 
 	manifest := readJSONFile(t, filepath.Join(out, ".claude-plugin", "plugin.json"))
-	if manifest["name"] != "agent-cli" {
+	if manifest["name"] != "agentcli" {
 		t.Errorf("manifest name = %v", manifest["name"])
 	}
 	if _, has := manifest["version"]; has {

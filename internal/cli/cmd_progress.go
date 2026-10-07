@@ -6,7 +6,7 @@ import (
 	"io"
 	"strconv"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/store"
+	"github.com/JustAzul/agentcli/internal/store"
 )
 
 func init() {

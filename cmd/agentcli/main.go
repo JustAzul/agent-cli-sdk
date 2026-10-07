@@ -4,7 +4,7 @@ package main
 import (
 	"os"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/cli"
+	"github.com/JustAzul/agentcli/internal/cli"
 )
 
 func main() { os.Exit(cli.Main(os.Args, os.Environ())) }

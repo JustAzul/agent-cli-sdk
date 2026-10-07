@@ -4,7 +4,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/store"
+	"github.com/JustAzul/agentcli/internal/store"
 )
 
 // Exit codes of the runs another process settles on a worker's behalf.

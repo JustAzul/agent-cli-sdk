@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/provider"
+	"github.com/JustAzul/agentcli/internal/provider"
 )
 
 func TestCapabilitiesUnsupportedNamesTheCapability(t *testing.T) {

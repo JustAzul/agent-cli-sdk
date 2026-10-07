@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/JustAzul/agent-cli-sdk/internal/version"
+	"github.com/JustAzul/agentcli/internal/version"
 )
 
 func init() {

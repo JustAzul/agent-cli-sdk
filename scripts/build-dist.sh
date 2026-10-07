@@ -38,7 +38,7 @@ if [ -z "${BUILD_SEQ:-}" ]; then
   BUILD_SEQ=$(git rev-list --count HEAD 2>/dev/null) || die "BUILD_SEQ is not set and git cannot count commits"
 fi
 
-pkg=github.com/JustAzul/agent-cli-sdk/internal/version
+pkg=github.com/JustAzul/agentcli/internal/version
 ldflags="-s -w -X $pkg.Version=$version -X $pkg.SourceCommit=$SOURCE_SHA -X $pkg.BuildSeq=$BUILD_SEQ"
 
 cp -R plugin/. "$out/"

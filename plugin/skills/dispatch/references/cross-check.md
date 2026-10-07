@@ -19,7 +19,7 @@ agentcli exec --scenario cross-check --cwd <repo-root> --background --json - <<'
 PROMPT
 ```
 
-Mod: `mcp__agent-cli__ask` with `scenario: "cross-check"` and `cwd` set to the
+Mod: `mcp__agentcli__ask` with `scenario: "cross-check"` and `cwd` set to the
 repository, so the file reads resolve.
 
 ## Prompt template

@@ -19,10 +19,10 @@ func TestPluginManifest(t *testing.T) {
 		t.Error("plugin.json must not carry a version field")
 	}
 	for k, want := range map[string]any{
-		"name":       "agent-cli",
+		"name":       "agentcli",
 		"license":    "MIT",
-		"homepage":   "https://github.com/JustAzul/agent-cli-sdk",
-		"repository": "https://github.com/JustAzul/agent-cli-sdk",
+		"homepage":   "https://github.com/JustAzul/agentcli",
+		"repository": "https://github.com/JustAzul/agentcli",
 		"author":     map[string]any{"name": "Diego (Azul) Ferreira"},
 	} {
 		if !reflect.DeepEqual(m[k], want) {
@@ -41,7 +41,7 @@ func TestPluginManifest(t *testing.T) {
 
 func TestMarketplaceManifest(t *testing.T) {
 	m := repoJSON(t, ".claude-plugin/marketplace.json")
-	if m["name"] != "agent-cli-sdk" {
+	if m["name"] != "agentcli" {
 		t.Errorf("marketplace name = %v", m["name"])
 	}
 	if !reflect.DeepEqual(m["owner"], map[string]any{"name": "JustAzul"}) {
@@ -52,10 +52,10 @@ func TestMarketplaceManifest(t *testing.T) {
 		t.Fatalf("plugins = %v, want exactly one", m["plugins"])
 	}
 	p := plugins[0].(map[string]any)
-	if p["name"] != "agent-cli" {
+	if p["name"] != "agentcli" {
 		t.Errorf("plugin name = %v", p["name"])
 	}
-	want := map[string]any{"source": "github", "repo": "JustAzul/agent-cli-sdk", "ref": "dist"}
+	want := map[string]any{"source": "github", "repo": "JustAzul/agentcli", "ref": "dist"}
 	if !reflect.DeepEqual(p["source"], want) {
 		t.Errorf("source = %v, want %v (no sha)", p["source"], want)
 	}

@@ -28,7 +28,7 @@ agentcli exec --scenario expert-persona --background --json - <<'PROMPT'
 PROMPT
 ```
 
-Mod: `mcp__agent-cli__ask` with `scenario: "expert-persona"`.
+Mod: `mcp__agentcli__ask` with `scenario: "expert-persona"`.
 
 ## Prompt template
 

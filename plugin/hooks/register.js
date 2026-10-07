@@ -53,16 +53,16 @@ import {
 } from './subagent.js'
 import { BAND_REFRESH_MS, bandLine, flaggedRuns, followedRuns, withProgress } from './band.js'
 
-const COMMAND = 'agent-cli-jobs'
-const NO_TOOLS = 'agent-cli agents run no tools: an agentcli job answers for them.'
+const COMMAND = 'agentcli-jobs'
+const NO_TOOLS = 'agentcli agents run no tools: an agentcli job answers for them.'
 // Set once the dispatch skill has loaded in this session; the agent types are
 // offered to the model only then. Session state is never shared with another
 // session, so no session can close another's gate.
-const DISPATCH_LOADED = { plugin: 'agent-cli', key: 'dispatchLoaded' }
+const DISPATCH_LOADED = { plugin: 'agentcli', key: 'dispatchLoaded' }
 // The band's lines: one for each run another caller flagged with
 // --agent-feedback that is still going. Session state, so the band redraws on
 // each write and a reload keeps what it shows.
-const HOOK_RUNS = { plugin: 'agent-cli', key: 'hookRuns' }
+const HOOK_RUNS = { plugin: 'agentcli', key: 'hookRuns' }
 // A step's response: what the run is doing as thinking, then the answer.
 const THINKING_BLOCK = 0
 const ANSWER_BLOCK = 1
@@ -122,7 +122,7 @@ export function register(on) {
     try {
       await $.command.register({
         name: COMMAND,
-        description: 'List the agent-cli jobs of this session',
+        description: 'List the agentcli jobs of this session',
         immediate: true,
       })
     } catch (error) {
@@ -132,11 +132,11 @@ export function register(on) {
     return next(e)
   })
 
-  on('tool.call', { tool: 'mcp__agent-cli__ask' }, async ($, e) => startTurn($, e, 'ask'))
-  on('tool.call', { tool: 'mcp__agent-cli__send' }, async ($, e) => startTurn($, e, 'send'))
-  on('tool.call', { tool: 'mcp__agent-cli__jobs' }, async ($, e) => runJobsAction($, e))
+  on('tool.call', { tool: 'mcp__agentcli__ask' }, async ($, e) => startTurn($, e, 'ask'))
+  on('tool.call', { tool: 'mcp__agentcli__send' }, async ($, e) => startTurn($, e, 'send'))
+  on('tool.call', { tool: 'mcp__agentcli__jobs' }, async ($, e) => runJobsAction($, e))
 
-  on('command.run', { command: 'agent-cli-jobs' }, async ($) => listJobs($))
+  on('command.run', { command: 'agentcli-jobs' }, async ($) => listJobs($))
 
   // The agent types. Every way these hooks can fail ends in an answer that
   // says the hand-off failed, never in a Claude model's answer.
@@ -186,7 +186,7 @@ async function registerTools($) {
     {
       name: 'ask',
       description:
-        'Start a new agent-cli conversation as a background job and return at once with {conversation_id, run_id}. ' +
+        'Start a new agentcli conversation as a background job and return at once with {conversation_id, run_id}. ' +
         'A notice arrives in this session when the job finishes, so do not poll for it.',
       inputSchema: {
         type: 'object',
@@ -197,7 +197,7 @@ async function registerTools($) {
     {
       name: 'send',
       description:
-        'Send the next turn of an existing agent-cli conversation as a background job and return at once with {conversation_id, run_id}. ' +
+        'Send the next turn of an existing agentcli conversation as a background job and return at once with {conversation_id, run_id}. ' +
         'A notice arrives in this session when the job finishes.',
       inputSchema: {
         type: 'object',
@@ -212,7 +212,7 @@ async function registerTools($) {
     {
       name: 'jobs',
       description:
-        'Inspect agent-cli jobs: list this session\'s recent runs, read the state of one run, read the output of a finished run, or cancel a run.',
+        'Inspect agentcli jobs: list this session\'s recent runs, read the state of one run, read the output of a finished run, or cancel a run.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -270,7 +270,7 @@ async function runJobsAction($, e) {
   return { result: reply.stdout }
 }
 
-// listJobs serves /agent-cli-jobs.
+// listJobs serves /agentcli-jobs.
 async function listJobs($) {
   try {
     const sessionId = await $.session.id()
@@ -576,7 +576,7 @@ async function finalAnswer($, bin, runId) {
   const status = await $.process.run([bin, 'status', runId, '--json'])
   const run = status.exitCode === 0 ? finishedRun(status.stdout) : null
   if (run === null) return handoffFailure('could not read run ' + runId + '. ' + failureText(status))
-  if (!isTerminal(run.state)) return handoffFailure('run ' + runId + ' is still ' + run.state + '; read it later with the agent-cli jobs tool.')
+  if (!isTerminal(run.state)) return handoffFailure('run ' + runId + ' is still ' + run.state + '; read it later with the agentcli jobs tool.')
 
   const output = await $.process.run([bin, 'result', runId])
   if (output.exitCode !== 0) return handoffFailure('could not read the output of run ' + runId + '. ' + failureText(output))

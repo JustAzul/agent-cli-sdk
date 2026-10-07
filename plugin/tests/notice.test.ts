@@ -18,7 +18,7 @@ test('a finished job shows a toast and submits a notice with its output inline',
   expect(w.toasts.length).toBe(1)
   expect(w.toasts[0]).toContain('run-1')
   expect(w.submits.length).toBe(1)
-  expect(w.submits[0]!.startsWith('agent-cli job run-1 (code-review, conversation conv-1) finished: ok')).toBe(true)
+  expect(w.submits[0]!.startsWith('agentcli job run-1 (code-review, conversation conv-1) finished: ok')).toBe(true)
   expect(w.submits[0]).toContain('Two findings.')
   const read = w.runs.find((r) => r.argv[1] === 'result')!
   expect(read.argv.slice(1)).toEqual(['result', 'run-1'])
@@ -31,7 +31,7 @@ test('the notice of a failed job names its state when there is no outcome', asyn
 
   await w.clock.advance(POLL_MS)
 
-  expect(w.submits[0]!.startsWith('agent-cli job run-1 (code-review, conversation conv-1) finished: failed')).toBe(true)
+  expect(w.submits[0]!.startsWith('agentcli job run-1 (code-review, conversation conv-1) finished: failed')).toBe(true)
 })
 
 test('running jobs and foreground runs raise no notice', async ($, on) => {

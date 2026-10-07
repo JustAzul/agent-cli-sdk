@@ -1,4 +1,4 @@
-# Verification Checklist: agent-cli-sdk (`agentcli`)
+# Verification Checklist: agentcli (`agentcli`)
 
 **Date**: 2026-10-04
 **Status**: Draft
@@ -58,15 +58,15 @@ Unless stated otherwise:
 - [ ] **shim platform selection (FR41):** on linux/amd64 → `bin/agentcli version --json` reports `platform: linux/amd64`. The same holds on the macOS CI runner for darwin.
 - [ ] **mod ask (FR46, FR47, US1):** in a session with the mod, Claude calls `ask {prompt}`.
   - It returns `{conversation_id, run_id}` at once.
-  - Within one poll interval after the job ends, a toast appears and a turn is submitted whose text starts `agent-cli job <run_id>` and contains the outcome and the output inline (≤ 8 KiB).
+  - Within one poll interval after the job ends, a toast appears and a turn is submitted whose text starts `agentcli job <run_id>` and contains the outcome and the output inline (≤ 8 KiB).
 - [ ] **mod send (FR46):** `send {conversation_id, prompt}` → a job for turn 2, with a notice on completion.
 - [ ] **mod jobs (FR46):** `jobs {action: "list"}`, `{action: "status", run_id}`, `{action: "result", run_id}`, `{action: "cancel", run_id}` each return the CLI's JSON or content.
-- [ ] **mod status line and command (FR48):** two running jobs → the status line shows 2. `/agent-cli-jobs` prints the session's recent jobs while Claude is mid-turn.
+- [ ] **mod status line and command (FR48):** two running jobs → the status line shows 2. `/agentcli-jobs` prints the session's recent jobs while Claude is mid-turn.
 - [ ] **provider version (FR17):** fake `codex --version` prints `codex-cli 9.9.9` → the record's `provider_version` is `codex-cli 9.9.9`. A fake whose version flag exits 1 → `provider_version: null`, and the run is otherwise unaffected.
 - [ ] **terminal ordering (FR22):** a test observer polls a job; at the first poll where `state.json` is terminal, `output.md` already has its final bytes and the conversation's marker is already cleared. The telemetry record appears after the terminal state, never before.
 - [ ] **job survives its launcher (FR25):** start a job from a shell, then kill that shell's whole process group → the job still reaches `done`, and `wait` from a new shell exits 0.
 - [ ] **namespaced attrs (FR36):** `--attr-json review.findings='{"total":2}'` → stored under the literal key `review.findings`, not nested as `review → findings`.
-- [ ] **marketplace manifest (FR39):** `claude plugin validate` on the repository root passes. The manifest lists one plugin `agent-cli` with source `github`, `ref: dist` and no `sha`.
+- [ ] **marketplace manifest (FR39):** `claude plugin validate` on the repository root passes. The manifest lists one plugin `agentcli` with source `github`, `ref: dist` and no `sha`.
 - [ ] **dist content (FR40, FR42):** the published `dist` tree contains the plugin manifest without `version`, `bin/agentcli`, four binaries, `SHA256SUMS` (all four checksums verify), the skill, the mod, commands, and a hooks file whose SessionStart runs `agentcli link --quiet; agentcli prune --auto`.
 - [ ] **repository identity (FR45):** `git log --format='%an <%ae>'` on the public repo shows only the owner's global git identity. LICENSE is MIT with the owner's name.
 - [ ] **mods API check (FR49):** before mod code is written, the installed build's mod type definitions are read, and the registration, tool, timer, toast, prompt-submit, status and store calls used by FR46–FR48 exist with the expected shapes. Any mismatch is reported as a blocker.
@@ -77,7 +77,7 @@ Unless stated otherwise:
 - [ ] **cutover order (FR51):** the migration log shows the steps in order (install → skill → hooks → parallel review → analyzer/command/harness → legacy import + archive → deletion), each with its verification evidence recorded before the next starts.
 - [ ] **parallel review (FR53, US4):** the code-review skill in parallel mode on a scratch branch → one job with `source: cr-parallel`, `scenario: code-review`; harvest through `wait` returns the provider exit and output path. A files-only target starts no job.
 - [ ] **stats command and harness (FR54, US7):** the stats slash command prints `agentcli stats` output. The eval harness counts as dispatches exactly the runs whose `ts` is inside the attempt window and whose `cwd` is the attempt's repository; a run from another cwd in the same window is not counted.
-- [ ] **skill gate (FR55):** in a session without the dispatch skill loaded, each of `agentcli exec "q"`, `nohup agentcli exec "q"`, `FOO=1 agentcli exec "q"`, `/abs/path/agentcli exec "q"` and `codex exec "q"` triggers the precondition naming `agent-cli:dispatch`. `echo agentcli` does not.
+- [ ] **skill gate (FR55):** in a session without the dispatch skill loaded, each of `agentcli exec "q"`, `nohup agentcli exec "q"`, `FOO=1 agentcli exec "q"`, `/abs/path/agentcli exec "q"` and `codex exec "q"` triggers the precondition naming `agentcli:dispatch`. `echo agentcli` does not.
 - [ ] **old names gone (FR55, FR56):** a text search for the old skill name across the listed skills, rules, hook docs and eval files returns no stale reference. A text search for `codex exec`/`codex review` invocations across hook scripts, hook libraries, scripts, commands and skill scripts returns zero (success metric 1).
 - [ ] **install check (FR59, US5):** after the marketplace install, a Bash tool `command -v agentcli` resolves inside the plugin. After a session start, a settings-hook probe resolves `~/.local/bin/agentcli`.
 
@@ -85,14 +85,14 @@ Unless stated otherwise:
 
 ## Agent types, progress and agent feedback
 
-- [ ] **agent type answers (FR64, FR67):** in a session with the plugin, after the dispatch skill loads, Claude calls `Agent(subagent_type: "agent-cli:second-opinion", prompt: "q")`.
+- [ ] **agent type answers (FR64, FR67):** in a session with the plugin, after the dispatch skill loads, Claude calls `Agent(subagent_type: "agentcli:second-opinion", prompt: "q")`.
   - A background agent row appears and streams the run's progress as thinking.
   - The completion notification carries the output and the `[agentcli run … · conversation … · ok]` trailer.
   - No Claude model request is made for the subagent; telemetry has one run with source `agent`.
-- [ ] **gate (FR64):** before the dispatch skill loads, `Agent(subagent_type: "agent-cli:adhoc")` is refused as an unknown type; after it loads, the call is accepted. Loading it in another session does not close this one.
-- [ ] **follow-up (FR65):** a SendMessage to a finished agent-cli agent runs `send` on its conversation; the provider answers with the earlier turn's context.
-- [ ] **cancel (FR65):** TaskStop on a running agent-cli agent → its run ends `cancelled` (exit 130).
-- [ ] **hand-off failure (FR64):** an agentcli failure (exit 3, busy) → the answer starts with `agent-cli: the hand-off to the agent failed` and no model request is made.
+- [ ] **gate (FR64):** before the dispatch skill loads, `Agent(subagent_type: "agentcli:adhoc")` is refused as an unknown type; after it loads, the call is accepted. Loading it in another session does not close this one.
+- [ ] **follow-up (FR65):** a SendMessage to a finished agentcli agent runs `send` on its conversation; the provider answers with the earlier turn's context.
+- [ ] **cancel (FR65):** TaskStop on a running agentcli agent → its run ends `cancelled` (exit 130).
+- [ ] **hand-off failure (FR64):** an agentcli failure (exit 3, busy) → the answer starts with `agentcli: the hand-off to the agent failed` and no model request is made.
 - [ ] **progress (FR66):** fake `review-ok` → `agentcli progress <run_id> --json` lists the two commands and the final message in order, `next: 3`; `--from 3` lists none; an unknown run exits 4.
 - [ ] **agent feedback flag (FR68):** `--agent-feedback --session-id s` → `agent_feedback: true` in `request.json` and `status --json`; `AGENTCLI_AGENT_FEEDBACK=1` likewise; with no session id the run exits 0, `agent_feedback: false`, and stderr says it was ignored.
 - [ ] **flagged run shown (FR69):** a hook starts a foreground `exec --agent-feedback` in the session → within one poll a line `agentcli · <scenario> · <source> · <elapsed> · <newest step>` appears above the prompt and follows what the run does; within 5 seconds of the run ending the line is gone. A run started by the agent types, or without the flag, gets no line. No agent row appears, no model request is made, and Claude receives nothing about the run.
@@ -111,7 +111,7 @@ Unless stated otherwise:
 - [ ] **danger sandbox (FR14):** `--sandbox danger-full-access` → exit 2.
 - [ ] **run-id validation (FR9):** `--run-id 'a b'`, `--run-id ..`, `--run-id .hidden`, `--run-id -x` → exit 2 each, with no directory created outside `runs/`. `--run-id ok.id-1` → accepted and used as the directory name. Reusing it → exit 2.
 - [ ] **provider mismatch on send (FR20):** a codex conversation → `agentcli send <conversation_id> --provider other "x"` exits 2. Omitting `--provider` uses `codex`.
-- [ ] **link without install record (FR43):** no installed-plugins record for `agent-cli@agent-cli-sdk` → `agentcli link` exits 4 with a message. `agentcli link --target /work/agentcli-shim` writes a launcher executing that path with the running binary's `build_seq`.
+- [ ] **link without install record (FR43):** no installed-plugins record for `agentcli@agentcli` → `agentcli link` exits 4 with a message. `agentcli link --target /work/agentcli-shim` writes a launcher executing that path with the running binary's `build_seq`.
 - [ ] **stats skipped counts (FR33):** one unknown-kind, one unknown-version and one garbage line → `stats --json` has `skipped: {unknown_kind: 1, unknown_version: 1, unparseable: 1}`. `runs` prints one stderr line with the same counts.
 - [ ] **stats default window (FR35):** records at 3 days and at 10 days old → `agentcli stats --json` counts only the 3-day record and reports `window_days: 7`.
 - [ ] **background with stdin (FR21):** `printf 'long prompt' | agentcli exec --background -` → `prompt.md` holds the full text before the worker starts, and the fake receives it.

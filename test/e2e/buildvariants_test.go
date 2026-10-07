@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-const versionPkg = "github.com/JustAzul/agent-cli-sdk/internal/version"
+const versionPkg = "github.com/JustAzul/agentcli/internal/version"
 
 var (
 	variantMu   sync.Mutex
