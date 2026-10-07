@@ -63,6 +63,12 @@ func printStatsSummary(ctx *Context, stats *telemetry.Obj, skipped telemetry.Ski
 	if u, ok := stats.Get("usage_totals").(*telemetry.Obj); ok && u.Get("runs_with_usage") != int64(0) {
 		fmt.Fprintf(ctx.Stdout, "tokens: %s (%v runs with usage)\n", countsLine(withoutKey(u, "runs_with_usage")), u.Get("runs_with_usage"))
 	}
+	if byModel, ok := stats.Get("usage_by_model").(*telemetry.Obj); ok {
+		for _, p := range byModel.Pairs() {
+			u := p.Value.(*telemetry.Obj)
+			fmt.Fprintf(ctx.Stdout, "tokens %s: %s (%v runs)\n", p.Key, countsLine(withoutKey(u, "runs_with_usage")), u.Get("runs_with_usage"))
+		}
+	}
 	if n := skipped.Total(); n > 0 {
 		fmt.Fprintf(ctx.Stdout, "skipped lines: %d (unknown_kind=%d unknown_version=%d unparseable=%d)\n",
 			n, skipped.UnknownKind, skipped.UnknownVersion, skipped.Unparseable)

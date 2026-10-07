@@ -37,7 +37,7 @@ func TestStatsParityWithTheRetiredAnalyzer(t *testing.T) {
 		}
 	}
 	// Only keys the analyzer never had may be extra.
-	wantKeys := append(append([]string(nil), keysOf(expected)...), "by_provider", "usage_totals", "skipped")
+	wantKeys := append(append([]string(nil), keysOf(expected)...), "by_provider", "usage_totals", "usage_by_model", "skipped")
 	if g := keysOf(actual); !reflect.DeepEqual(g, sortedCopy(wantKeys)) {
 		t.Errorf("stats keys = %v, want %v", g, sortedCopy(wantKeys))
 	}

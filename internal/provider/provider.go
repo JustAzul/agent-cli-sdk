@@ -122,6 +122,13 @@ type Progress struct {
 	Text string
 }
 
+// ModelReporter is a provider that can tell, once a run is over, which model
+// and effort it actually ran with, from its own records. The runner records
+// them beside the requested ones; "" means it could not tell.
+type ModelReporter interface {
+	UsedModel(env []string, sessionID string) (model, effort string)
+}
+
 // Provider adapts one agent CLI.
 type Provider interface {
 	Name() string

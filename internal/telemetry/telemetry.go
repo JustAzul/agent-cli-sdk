@@ -41,6 +41,8 @@ type Record struct {
 	ModelSource       string          `json:"model_source"`
 	Effort            *string         `json:"effort"`
 	EffortSource      string          `json:"effort_source"`
+	ModelUsed         *string         `json:"model_used"`
+	EffortUsed        *string         `json:"effort_used"`
 	Sandbox           *string         `json:"sandbox"`
 	Source            string          `json:"source"`
 	SessionID         *string         `json:"session_id"`

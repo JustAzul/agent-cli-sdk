@@ -14,7 +14,7 @@ import (
 // fr31Fields is the exact key set of a run record.
 var fr31Fields = []string{
 	"v", "kind", "run_id", "ts", "provider", "provider_version", "command", "scenario",
-	"model", "model_source", "effort", "effort_source", "sandbox", "source", "session_id",
+	"model", "model_source", "effort", "effort_source", "model_used", "effort_used", "sandbox", "source", "session_id",
 	"conversation_id", "turn", "cwd", "background", "exit_code", "outcome", "duration_ms",
 	"timeout_s", "output_file", "output_bytes", "error_excerpt", "usage", "provider_session_id", "attrs",
 }

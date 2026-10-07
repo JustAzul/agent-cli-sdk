@@ -435,9 +435,21 @@ func (j *Job) appendTelemetry(st store.State, label, excerpt string, o outcome) 
 	rec.ErrorExcerpt = nullable(excerpt)
 	rec.Usage = provider.NormalizeUsage(rec.Command, o.usage)
 	rec.ProviderSessionID = nullable(o.sessionID)
+	rec.ModelUsed, rec.EffortUsed = j.usedModel(o.sessionID)
 	if err := telemetry.Append(j.Store.Home, rec, j.Now(), telemetry.Options{}); err != nil {
 		j.Warn(fmt.Sprintf("could not append the telemetry record: %v", err))
 	}
+}
+
+// usedModel asks the provider which model and effort the run actually used,
+// when it can tell.
+func (j *Job) usedModel(sessionID string) (model, effort *string) {
+	reporter, ok := j.Provider.(provider.ModelReporter)
+	if !ok || sessionID == "" {
+		return nil, nil
+	}
+	m, e := reporter.UsedModel(j.Env, sessionID)
+	return nullable(m), nullable(e)
 }
 
 func (j *Job) stamp() string { return j.Now().UTC().Format(time.RFC3339) }

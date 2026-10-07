@@ -17,10 +17,12 @@ func init() {
 
 const defaultWindowDays = 7
 
-// window is the time range a reader command covers.
+// window is the time range a reader command covers, and the one Claude Code
+// session it is narrowed to when sessionID is set.
 type window struct {
-	all  bool
-	days int
+	all       bool
+	days      int
+	sessionID string
 }
 
 // since is the start of the window; nil reads everything.
@@ -33,19 +35,22 @@ func (w window) since(now time.Time) *time.Time {
 }
 
 // windowFlags parses the flags the reader commands share (--days, --all,
-// --json) and no positionals. exit is meaningful when done is true.
+// --session-id, --json) and no positionals. exit is meaningful when done is
+// true.
 func windowFlags(ctx *Context, name string, args []string) (w window, asJSON bool, exit int, done bool) {
 	var all bool
+	var sessionID string
 	days := defaultWindowDays
 	fset := flag.NewFlagSet(name, flag.ContinueOnError)
 	fset.SetOutput(io.Discard)
 	fset.IntVar(&days, "days", defaultWindowDays, "window size in days")
 	fset.BoolVar(&all, "all", false, "read all history")
+	fset.StringVar(&sessionID, "session-id", "", "only the runs of this Claude Code session")
 	fset.BoolVar(&asJSON, "json", false, "print JSON")
 	ctx.JSON = wantsJSON(args)
 	if err := fset.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			fmt.Fprintf(ctx.Stderr, "usage: agentcli %s [--days N | --all] [--json]\n", name)
+			fmt.Fprintf(ctx.Stderr, "usage: agentcli %s [--days N | --all] [--session-id ID] [--json]\n", name)
 			return w, false, ExitOK, true
 		}
 		return w, false, ctx.Fail(ExitUsage, "%v", err), true
@@ -60,7 +65,7 @@ func windowFlags(ctx *Context, name string, args []string) (w window, asJSON boo
 	case days < 0:
 		return w, false, ctx.Fail(ExitUsage, "--days must not be negative"), true
 	}
-	return window{all: all, days: days}, asJSON, 0, false
+	return window{all: all, days: days, sessionID: sessionID}, asJSON, 0, false
 }
 
 // foldWindow reads and folds the telemetry of the window under the resolved home.
@@ -73,7 +78,21 @@ func foldWindow(ctx *Context, w window) (telemetry.Folded, int) {
 	if err != nil {
 		return telemetry.Folded{}, ctx.Fail(ExitInternal, "reading telemetry: %v", err)
 	}
+	if w.sessionID != "" {
+		folded.Runs = inSession(folded.Runs, w.sessionID)
+	}
 	return folded, 0
+}
+
+// inSession keeps the runs recorded with the given session id.
+func inSession(runs []map[string]any, sessionID string) []map[string]any {
+	kept := []map[string]any{}
+	for _, run := range runs {
+		if id, _ := run["session_id"].(string); id == sessionID {
+			kept = append(kept, run)
+		}
+	}
+	return kept
 }
 
 func runRuns(ctx *Context, args []string) int {

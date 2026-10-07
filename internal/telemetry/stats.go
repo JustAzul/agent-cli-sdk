@@ -117,6 +117,7 @@ type entry struct {
 	findings map[string]any
 	usage    map[string]any
 	hasUsage bool
+	model    string // the model the run used, else the one it asked for
 }
 
 func newEntry(run map[string]any) entry {
@@ -135,6 +136,7 @@ func newEntry(run map[string]any) entry {
 	e.outBytes = intPtr(run["output_bytes"])
 	e.duration = intPtr(run["duration_ms"])
 	e.usage, e.hasUsage = run["usage"].(map[string]any)
+	e.model = modelOf(run)
 
 	attrs, _ := run["attrs"].(map[string]any)
 	if legacy, _ := attrs["legacy"].(bool); legacy {
@@ -253,6 +255,7 @@ func ComputeStats(runs []map[string]any, skipped Skipped, windowDays *int) *Obj 
 	}
 	out.Set("by_provider", providers.obj(true))
 	out.Set("usage_totals", usageTotals(entries))
+	out.Set("usage_by_model", usageByModel(entries))
 	out.Set("skipped", skipped)
 	return out
 }
@@ -385,6 +388,37 @@ func findingsProxy(entries []entry) *Obj {
 	sort.Slice(sizes, func(i, j int) bool { return sizes[i] < sizes[j] })
 	return obj("total", int64(len(reviews)), "succeeded", int64(len(sizes)), "failed_or_empty", failed,
 		"clean_proxy", clean, "with_output_proxy", withOutput, "median_output_bytes", sizes[len(sizes)/2], "note", proxyNote)
+}
+
+// modelOf names a run's model for the per-model totals: the model the
+// provider reported using, else the one the run asked for, else "unknown".
+func modelOf(run map[string]any) string {
+	for _, key := range []string{"model_used", "model"} {
+		if m, ok := run[key].(string); ok && m != "" {
+			return m
+		}
+	}
+	return "unknown"
+}
+
+// usageByModel is usageTotals for each model, the models in name order.
+func usageByModel(entries []entry) *Obj {
+	byModel := map[string][]entry{}
+	for _, e := range entries {
+		if e.hasUsage {
+			byModel[e.model] = append(byModel[e.model], e)
+		}
+	}
+	models := make([]string, 0, len(byModel))
+	for m := range byModel {
+		models = append(models, m)
+	}
+	sort.Strings(models)
+	out := &Obj{}
+	for _, m := range models {
+		out.Set(m, usageTotals(byModel[m]))
+	}
+	return out
 }
 
 func usageTotals(entries []entry) *Obj {
