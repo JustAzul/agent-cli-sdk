@@ -1,9 +1,10 @@
 package store
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -56,29 +57,29 @@ func (w *ProgressWriter) Append(at time.Time, kind, text string) error {
 func (w *ProgressWriter) Close() error { return w.f.Close() }
 
 // ReadProgress returns the run's progress entries numbered from `from` on. A
-// run with no progress file yet has none. A last line still being written is
-// left for the next read.
+// run with no progress file yet has none. A last line with no newline yet is
+// still being written and is left for the next read; any other line that is
+// not an entry is an error, never skipped.
 func (s *Store) ReadProgress(runID string, from int) ([]ProgressEntry, error) {
-	f, err := os.Open(s.ProgressPath(runID))
+	data, err := os.ReadFile(s.ProgressPath(runID))
 	if errors.Is(err, os.ErrNotExist) {
 		return []ProgressEntry{}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
 
+	lines := bytes.Split(data, []byte{'\n'})
+	complete := lines[:len(lines)-1]
 	entries := []ProgressEntry{}
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
-	for sc.Scan() {
+	for i, line := range complete {
 		var e ProgressEntry
-		if json.Unmarshal(sc.Bytes(), &e) != nil {
-			continue
+		if err := json.Unmarshal(line, &e); err != nil {
+			return nil, fmt.Errorf("progress line %d is not an entry: %w", i+1, err)
 		}
 		if e.Seq >= from {
 			entries = append(entries, e)
 		}
 	}
-	return entries, sc.Err()
+	return entries, nil
 }
