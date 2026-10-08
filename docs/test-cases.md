@@ -189,9 +189,10 @@ Expected cached prices (US dollars per million tokens):
 - [ ] **usage errors come first (FR72):** `AGENTCLI_PRICES_URL=off agentcli prices refresh --max-age soon` → exit 2, not `reason: off`.
 - [ ] **corrupt cache (FR71):** `prices.json` holding `{` or `"v": 2` → `stats` reports null costs and `prices_checked_at: null`; `prices` reports `cached: false`; `refresh` makes a full GET and replaces the file.
 - [ ] **usage errors (FR72):** `prices refresh --max-age soon`, `--max-age -1h`, an unknown flag, or a positional argument → exit 2 with `sdk_status: usage_error`.
-- [ ] **compaction during a refresh (FR77):** a compaction arrives while a refresh is still running → it is dropped, and no second refresh process starts.
+- [ ] **compaction during a refresh (FR77):** a compaction arrives while a `--max-age 24h` refresh is still running → no second process starts while it runs. When it ends (even with `reason: fresh`), exactly one queued `prices refresh --json` without `--max-age` starts.
+- [ ] **requests coalesce (FR77):** two compactions and a missing-price request arrive while one refresh runs → exactly one queued refresh runs after it, not three.
 - [ ] **missing price triggers once (FR77):** stats keeps answering `missing_prices: [m-new]` → exactly one refresh runs for `m-new` in this load.
-- [ ] **dropped request keeps its turn (FR77):** `missing_prices: [m-new]` arrives while another refresh is running → that request is dropped. The next stats read that still reports `m-new` starts its one refresh.
+- [ ] **queued request survives an unchanged refresh (FR77):** `missing_prices: [m-new]` arrives while a refresh that will answer `changed: false` is running → when it ends, the queued refresh runs. If that one answers `changed: true`, the next poll reads stats again, with no new run ending in between.
 
 ### Failure and error handling
 
