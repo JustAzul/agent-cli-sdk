@@ -305,7 +305,7 @@ latest thing it did, gone once it ends. Only you see the band: nothing about
 the run reaches Claude, and the caller that started it delivers its result.
 
 The status line counts the session's running jobs and shows what the
-session's runs cost, hook runs included (`1 job running · Codex $0.68`; `≥`
+session's runs cost, hook runs included (`💸 1 job running · Codex $0.68`; `≥`
 when part of it has no price). The mod refreshes the price cache when the
 session starts (at most once a day) and whenever the conversation is
 compacted. `/agentcli-jobs` lists the session's jobs at once, even while Claude

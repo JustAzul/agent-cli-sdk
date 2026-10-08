@@ -144,10 +144,10 @@ Expected cached prices (US dollars per million tokens):
 - [ ] **stats text (FR75):** for the three runs above:
   - the `tokens:` lines carry no cost key;
   - the output has `cost: $0.95`, plus `cost m-sol: $0.68`, `cost m-old: $0.26` and `cost m-bare: $0.01`.
-- [ ] **status line cost (FR78, US8):** stats answers `cost_usd "0.680000"` with `cost_complete: true` and one job running → the status line is `1 job running · Codex $0.68`. With no job running, it is `Codex $0.68`.
+- [ ] **status line cost (FR78, US8):** stats answers `cost_usd "0.680000"` with `cost_complete: true` and one job running → the status line is `💸 1 job running · Codex $0.68`. With no job running, it is `💸 Codex $0.68`; with one job running and `cost_usd` null, it is `💸 1 job running`.
 - [ ] **status line rounding (FR78):**
 
-  | `cost_usd` | complete? | Status line |
+  | `cost_usd` | complete? | Codex part of the status line |
   |---|---|---|
   | `"52.940726"` | yes | `Codex $52.94` |
   | `"1.005000"` | yes | `Codex $1.01` |

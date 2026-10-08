@@ -293,7 +293,10 @@ export function compactCount(n) {
   return String(value)
 }
 
+// STATUS_MARK leads the plugin's status line.
+export const STATUS_MARK = '💸'
+
 export function statusLine(jobsText, cost) {
   const parts = [jobsText, cost].filter((part) => typeof part === 'string' && part !== '')
-  return parts.length === 0 ? undefined : parts.join(' · ')
+  return parts.length === 0 ? undefined : `${STATUS_MARK} ${parts.join(' · ')}`
 }

@@ -347,5 +347,5 @@ test('a cost read that throws keeps the price change for the next poll', async (
   await w.clock.advance(POLL_MS)
 
   expect(statsCalls).toBe(2)
-  expect(w.statuses.at(-1)).toBe('Codex $2.00')
+  expect(w.statuses.at(-1)).toBe('💸 Codex $2.00')
 })

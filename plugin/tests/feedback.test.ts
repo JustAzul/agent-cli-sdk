@@ -219,7 +219,7 @@ test("the status line adds the session's Codex cost, read again when a run ends"
   await $.session.start(START)
 
   await w.clock.advance(POLL_MS)
-  expect(w.statuses.at(-1)).toBe('1 job running · Codex $0.68')
+  expect(w.statuses.at(-1)).toBe('💸 1 job running · Codex $0.68')
   const read = w.runs.find((r) => r.argv[1] === 'stats')!
   expect(read.argv.slice(1)).toEqual(['stats', '--session-id', SESSION, '--all', '--json'])
 
@@ -239,7 +239,7 @@ test("the status line adds the session's Codex cost, read again when a run ends"
   }
   await w.clock.advance(POLL_MS)
   expect(w.runs.filter((r) => r.argv[1] === 'stats').length).toBe(3)
-  expect(w.statuses.at(-1)).toBe('Codex $2.50')
+  expect(w.statuses.at(-1)).toBe('💸 Codex $2.50')
 })
 
 test('a session with nothing priced has no Codex part in the status line', async ($, on) => {
@@ -252,7 +252,7 @@ test('a session with nothing priced has no Codex part in the status line', async
 
   await w.clock.advance(POLL_MS)
 
-  expect(w.statuses.at(-1)).toBe('1 job running')
+  expect(w.statuses.at(-1)).toBe('💸 1 job running')
 })
 
 test('a cost that is only a lower bound shows as one in the status line', async ($, on) => {
@@ -262,7 +262,7 @@ test('a cost that is only a lower bound shows as one in the status line', async 
 
   await w.clock.advance(POLL_MS)
 
-  expect(w.statuses.at(-1)).toBe('Codex ≥$52.94')
+  expect(w.statuses.at(-1)).toBe('💸 Codex ≥$52.94')
 })
 
 test('a cost that cannot be read is read again on the next poll', async ($, on) => {
@@ -279,7 +279,7 @@ test('a cost that cannot be read is read again on the next poll', async ($, on) 
   fails = false
   await w.clock.advance(POLL_MS)
 
-  expect(w.statuses.at(-1)).toBe('Codex <$0.01')
+  expect(w.statuses.at(-1)).toBe('💸 Codex <$0.01')
   expect(w.logs.filter((l) => l.includes('session cost')).length).toBe(1)
 })
 
