@@ -374,17 +374,24 @@ async function showStatus($, bin, sessionId, running, terminal) {
 }
 
 // sessionCost is the status line's cost text, undefined when no run could be
-// priced, or null when the cost could not be read (logged once).
+// priced, or null when the cost could not be read (logged once), the run of
+// agentcli itself failing included.
 async function sessionCost($, bin, sessionId) {
-  const reply = await $.process.run(sessionStatsCommand(bin, sessionId))
-  if (reply.exitCode === 0) {
-    isCostFailureLogged = false
-    askForPrices($, missingPrices(reply.stdout))
-    return costText(reply.stdout)
+  let failure
+  try {
+    const reply = await $.process.run(sessionStatsCommand(bin, sessionId))
+    if (reply.exitCode === 0) {
+      isCostFailureLogged = false
+      askForPrices($, missingPrices(reply.stdout))
+      return costText(reply.stdout)
+    }
+    failure = failureText(reply)
+  } catch (error) {
+    failure = messageOf(error)
   }
   if (!isCostFailureLogged) {
     isCostFailureLogged = true
-    $.ui.log('could not read the session cost: ' + failureText(reply), { to: 'debug' })
+    $.ui.log('could not read the session cost: ' + failure, { to: 'debug' })
   }
   return null
 }

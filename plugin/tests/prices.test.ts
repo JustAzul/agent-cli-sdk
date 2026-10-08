@@ -328,3 +328,24 @@ test('each load of the mod refreshes at its start with the same max age', async 
     ['prices', 'refresh', '--max-age', '24h', '--json'],
   ])
 })
+
+test('a cost read that throws keeps the price change for the next poll', async ($, on) => {
+  const w = world(on)
+  w.respondPrices = () => report({ changed: true })
+  let statsCalls = 0
+  w.respond = (argv) => {
+    if (argv[1] === 'stats') {
+      statsCalls += 1
+      if (statsCalls === 1) throw new Error('agentcli vanished')
+      return ok(stats('2.000000'))
+    }
+    return listing()
+  }
+  await $.session.start(START)
+  await w.clock.advance(0)
+  await w.clock.advance(POLL_MS)
+  await w.clock.advance(POLL_MS)
+
+  expect(statsCalls).toBe(2)
+  expect(w.statuses.at(-1)).toBe('Codex $2.00')
+})
