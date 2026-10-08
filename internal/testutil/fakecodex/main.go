@@ -31,6 +31,9 @@ func main() {
 		fmt.Println(os.Getenv("FAKECODEX_VERSION"))
 		return
 	}
+	if len(os.Args) == 3 && os.Args[1] == "debug" && os.Args[2] == "models" {
+		os.Exit(debugModels())
+	}
 	os.Exit(run())
 }
 
@@ -82,6 +85,26 @@ func run() int {
 	}
 	code, _ := strconv.Atoi(os.Getenv("FAKECODEX_EXIT"))
 	return code
+}
+
+// debugModels is `codex debug models`: it prints the file FAKECODEX_MODELS
+// names, verbatim, or fails when that variable is unset. It never reads stdin.
+func debugModels() int {
+	if path := os.Getenv("FAKECODEX_RECORD"); path != "" {
+		record(path, nil)
+	}
+	path := os.Getenv("FAKECODEX_MODELS")
+	if path == "" {
+		fmt.Fprintln(os.Stderr, "fakecodex: no model catalog (FAKECODEX_MODELS is unset)")
+		return 1
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fakecodex: %v\n", err)
+		return 1
+	}
+	os.Stdout.Write(data)
+	return 0
 }
 
 func record(path string, stdin []byte) {

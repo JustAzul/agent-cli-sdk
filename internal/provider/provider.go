@@ -130,6 +130,15 @@ type ModelReporter interface {
 	UsedModel(env []string, sessionID string) (model, effort string, err error)
 }
 
+// ModelCatalog is a provider that can list the models it offers and names the
+// namespace (the price list's litellm_provider) their entries use.
+// CatalogModels runs with the caller's environment; an error means the catalog
+// could not be read, which leaves the models seen in the telemetry.
+type ModelCatalog interface {
+	PriceNamespace() string
+	CatalogModels(env []string) ([]string, error)
+}
+
 // Provider adapts one agent CLI.
 type Provider interface {
 	Name() string

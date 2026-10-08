@@ -1,0 +1,10 @@
+{
+  "m-sol": {"litellm_provider": "openai", "mode": "chat", "input_cost_per_token": 2e-06, "cache_read_input_token_cost": 1e-07, "cache_creation_input_token_cost": 2.5e-06, "output_cost_per_token": 1e-05},
+  "m-old": {"litellm_provider": "openai", "mode": "chat", "input_cost_per_token": 5e-06, "cache_read_input_token_cost": 5e-07, "output_cost_per_token": 3e-05},
+  "m-bare": {"litellm_provider": "openai", "mode": "chat", "input_cost_per_token": 1e-06, "output_cost_per_token": 4e-06},
+  "m-zero": {"litellm_provider": "openai", "mode": "chat", "input_cost_per_token": 3e-06, "cache_read_input_token_cost": 3e-07, "cache_creation_input_token_cost": 0, "output_cost_per_token": 1.2e-05},
+  "m-half": {"litellm_provider": "openai", "mode": "chat", "input_cost_per_token": 5e-07, "output_cost_per_token": 5e-07},
+  "m-text": {"litellm_provider": "openai", "mode": "chat", "input_cost_per_token": "2e-06", "output_cost_per_token": 1e-05},
+  "chatgpt/m-sol": {"litellm_provider": "chatgpt", "mode": "responses", "input_cost_per_token": null, "output_cost_per_token": null},
+  "m-azure": {"litellm_provider": "azure", "mode": "chat", "input_cost_per_token": 2e-06, "output_cost_per_token": 1e-05}
+}

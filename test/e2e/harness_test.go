@@ -88,16 +88,17 @@ type sandbox struct {
 	stdin string
 }
 
-// newSandbox puts the fake codex on PATH. The child environment is built
-// explicitly and never inherited, so the host's CLAUDE_CODE_SESSION_ID or a
-// real codex cannot leak in.
+// newSandbox puts the fake codex on PATH and switches the price refresh off; a
+// test that refreshes sets AGENTCLI_PRICES_URL to its own server. The child
+// environment is built explicitly and never inherited, so the host's
+// CLAUDE_CODE_SESSION_ID or a real codex cannot leak in.
 func newSandbox(t *testing.T) *sandbox {
 	t.Helper()
 	return &sandbox{
 		t:    t,
 		home: filepath.Join(t.TempDir(), "home"),
 		path: fakeDir + string(os.PathListSeparator) + "/usr/bin:/bin",
-		env:  map[string]string{},
+		env:  map[string]string{"AGENTCLI_PRICES_URL": "off"},
 	}
 }
 

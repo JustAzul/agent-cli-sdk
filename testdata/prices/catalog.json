@@ -1,0 +1,8 @@
+{
+  "models": [
+    {"slug": "m-sol", "display_name": "M Sol", "visibility": "list"},
+    {"slug": "m-old", "display_name": "M Old", "visibility": "list"},
+    {"slug": "m-bare", "display_name": "M Bare", "visibility": "list"},
+    {"slug": "m-hidden", "display_name": "M Hidden", "visibility": "hide"}
+  ]
+}

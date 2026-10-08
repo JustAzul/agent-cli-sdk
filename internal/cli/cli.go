@@ -94,6 +94,8 @@ func sdkStatusFor(code int) string {
 		return "wait_timeout"
 	case ExitNotResumable:
 		return "not_resumable"
+	case ExitPricesUnavailable:
+		return "prices_unavailable"
 	case ExitTimeout:
 		return "timeout"
 	case ExitLost:
