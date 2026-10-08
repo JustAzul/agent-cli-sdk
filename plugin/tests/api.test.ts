@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { listing, world } from './kit'
+import { listing, otherRuns, world } from './kit'
 
 const START = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 
@@ -53,5 +53,5 @@ test('a command that is refused is logged and does not stop the session from sta
   expect(w.logs[0]).toContain('agentcli-jobs')
   // The poll is running although the command was refused.
   await w.clock.advance(15000)
-  expect(w.runs.length).toBe(1)
+  expect(otherRuns(w).length).toBe(1)
 })

@@ -4,6 +4,7 @@
 // tested on their own.
 
 import { RESULT_OUTPUT_BYTES, cutBytes, isTerminal, resultNote } from './lib.js'
+import { formatCost } from './prices.js'
 
 export const AGENT_SOURCE = 'agent'
 export const DISPATCH_SKILL = 'dispatch'
@@ -215,12 +216,18 @@ export function progressCommand(bin, runId, from) {
 }
 
 // readProgress reads `progress --json`: the entries, where the next read
-// starts and the run's state, or null when it is not a progress listing.
+// starts, the run's state and its cost so far (null when it has none yet), or
+// null when it is not a progress listing.
 export function readProgress(stdout) {
   try {
     const parsed = JSON.parse(stdout)
     if (!parsed || !Array.isArray(parsed.entries) || typeof parsed.next !== 'number') return null
-    return { next: parsed.next, entries: parsed.entries, state: typeof parsed.state === 'string' ? parsed.state : null }
+    return {
+      next: parsed.next,
+      entries: parsed.entries,
+      state: typeof parsed.state === 'string' ? parsed.state : null,
+      cost: typeof parsed.cost_usd === 'string' ? parsed.cost_usd : null,
+    }
   } catch {
     return null
   }
@@ -241,7 +248,7 @@ export function heartbeatLine(elapsedMs) {
 }
 
 // terminalRunIds is a key that changes whenever one more run of the session
-// ends, so the token count is read again only then.
+// ends, so the session's cost is read again only then.
 export function terminalRunIds(stdout) {
   try {
     const parsed = JSON.parse(stdout)
@@ -256,15 +263,26 @@ export function sessionStatsCommand(bin, sessionId) {
   return [bin, 'stats', '--session-id', sessionId, '--all', '--json']
 }
 
-// tokensText is the session's Codex token use for the status line, or
-// undefined when none of its runs reported usage.
-export function tokensText(stdout) {
+// costText is the session's Codex cost for the status line, or undefined when
+// none of its runs could be priced.
+export function costText(stdout) {
   try {
     const totals = JSON.parse(stdout).usage_totals
-    if (!totals || !(totals.runs_with_usage > 0)) return undefined
-    return 'Codex ' + compactCount(totals.input_tokens) + ' in · ' + compactCount(totals.output_tokens) + ' out'
+    const cost = formatCost(totals?.cost_usd, totals?.cost_complete === true)
+    return cost === undefined ? undefined : 'Codex ' + cost
   } catch {
     return undefined
+  }
+}
+
+// missingPrices are the models of the session's runs that the price cache knows
+// nothing about, not even as unpriced; a refresh may find them.
+export function missingPrices(stdout) {
+  try {
+    const missing = JSON.parse(stdout).missing_prices
+    return Array.isArray(missing) ? missing.filter((model) => typeof model === 'string') : []
+  } catch {
+    return []
   }
 }
 
@@ -275,7 +293,7 @@ export function compactCount(n) {
   return String(value)
 }
 
-export function statusLine(jobsText, tokens) {
-  const parts = [jobsText, tokens].filter((part) => typeof part === 'string' && part !== '')
+export function statusLine(jobsText, cost) {
+  const parts = [jobsText, cost].filter((part) => typeof part === 'string' && part !== '')
   return parts.length === 0 ? undefined : parts.join(' · ')
 }

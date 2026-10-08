@@ -3,6 +3,7 @@
 // job) while they work. Nothing here touches the mods API.
 
 import { isTerminal } from './lib.js'
+import { formatCost } from './prices.js'
 import { AGENT_SOURCE, formatElapsed } from './subagent.js'
 
 export const BAND_REFRESH_MS = 5000
@@ -42,6 +43,7 @@ function newFollowed(run) {
     startedAt: Number.isNaN(startedAt) ? null : startedAt,
     from: 0,
     line: '',
+    cost: null,
   }
 }
 
@@ -49,19 +51,23 @@ function newFollowed(run) {
 export function bandLine(run, now) {
   const parts = ['agentcli', run.scenario, run.source]
   if (run.startedAt !== null) parts.push(formatElapsed(now - run.startedAt))
+  parts.push(formatCost(run.cost, true) ?? '')
   if (run.line !== '') parts.push(run.line.replace(/\s+/g, ' ').trim().slice(0, PROGRESS_CHARS))
   return parts.filter((part) => part !== '').join(' · ')
 }
 
 // withProgress applies what a refresh read to the runs the band follows now:
 // a run the read found ended is dropped, and one with new entries shows the
-// newest. A run without a read (one a poll added meanwhile) is kept as it is.
+// newest. A run without a read (one a poll added meanwhile) is kept as it is,
+// and so is the cost of one whose read failed; a read that answers no cost
+// clears it.
 export function withProgress(followed, read) {
   return followed.flatMap((run) => {
     const progress = read.get(run.run_id)
     if (progress === undefined) return [run]
     if (isTerminal(progress.state)) return []
     const line = progress.text.length > 0 ? progress.text[progress.text.length - 1] : run.line
-    return [{ ...run, from: progress.next, line }]
+    const cost = progress.cost === undefined ? run.cost : progress.cost
+    return [{ ...run, from: progress.next, line, cost }]
   })
 }

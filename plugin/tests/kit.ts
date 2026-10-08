@@ -11,6 +11,11 @@ export type Run = { argv: string[]; stdin?: string; cwd?: string }
 export type Reply = { exitCode: number; stdout: string; stderr: string }
 export type Responder = (argv: string[], init: any) => Reply | Promise<Reply>
 
+// The price refresh the mod runs on its own schedule: `<shim> prices refresh …`.
+export const isPrices = (argv: readonly string[]) => argv[1] === 'prices'
+export const pricesRuns = (w: { runs: Run[] }) => w.runs.filter((r) => isPrices(r.argv))
+export const otherRuns = (w: { runs: Run[] }) => w.runs.filter((r) => !isPrices(r.argv))
+
 export function ok(stdout: string): Reply {
   return { exitCode: 0, stdout, stderr: '' }
 }
@@ -52,6 +57,8 @@ export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
     respond: ((argv: string[]) => {
       throw new Error('unexpected agentcli call: ' + argv.join(' '))
     }) as Responder,
+    // What `prices refresh` answers; by default a cache that is still fresh.
+    respondPrices: (() => ok(JSON.stringify({ sdk_status: 'ok', exit_code: 0, ran: false, changed: false, reason: 'fresh' }))) as Responder,
     agentTypes: [] as any[],
     agents: [] as { id: string; type: string }[],
     messages: {} as Record<string, { role: 'user' | 'assistant'; text: string }[]>,
@@ -102,8 +109,11 @@ export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
   on('store.keys', () => ({ value: [...w.store.keys()] }))
   on('process.run', async (_$: any, e: any) => {
     w.runs.push({ argv: [...e.argv], stdin: e.init?.stdin, cwd: e.init?.cwd })
-    return { value: await w.respond([...e.argv], e.init ?? {}) }
+    const answer = isPrices(e.argv) ? w.respondPrices : w.respond
+    return { value: await answer([...e.argv], e.init ?? {}) }
   })
+  // The compaction beneath the plugin: the engine's own, which keeps nothing.
+  on('session.compact', () => ({ messages: [{ role: 'user', text: 'a summary', toolUses: [] }] }))
   on('agent.register', (_$: any, e: any) => {
     w.agentTypes.push(e)
     return { value: { agent: 'agentcli:' + e.name } }

@@ -31,6 +31,7 @@ import {
   agentSpecs,
   answerText,
   conversationOf,
+  costText,
   finishedRun,
   firstTurnCommand,
   followUpCommand,
@@ -38,6 +39,7 @@ import {
   hasAnswered,
   heartbeatLine,
   isWaitTimeout,
+  missingPrices,
   progressCommand,
   progressLine,
   readConversations,
@@ -47,10 +49,16 @@ import {
   sliceWaitCommand,
   statusLine,
   terminalRunIds,
-  tokensText,
   turnPrompt,
   typeOf,
 } from './subagent.js'
+import {
+  REFRESH_TIMEOUT_MS,
+  isRefreshedByCompaction,
+  mergeRefreshRequests,
+  refreshCommand,
+  refreshOutcome,
+} from './prices.js'
 import { BAND_REFRESH_MS, bandLine, flaggedRuns, followedRuns, withProgress } from './band.js'
 
 const COMMAND = 'agentcli-jobs'
@@ -90,13 +98,22 @@ let hasPolledRuns = false
 let isRefreshingBand = false
 let isBandFailureLogged = false
 let shownStatus = null
-// The terminal runs of the session when its token count was last read, and
-// that count. A run's telemetry record lands just after its terminal state, so
-// the count is read when another run ends and once more on the next poll.
+// The terminal runs of the session when its cost was last read, and that cost.
+// A run's telemetry record lands just after its terminal state, so the cost is
+// read when another run ends and once more on the next poll.
 let shownTerminal = ''
-let shownTokens = undefined
-let isTokensRefreshDue = false
-let isTokensFailureLogged = false
+let shownCost = undefined
+let isCostRefreshDue = false
+let isCostFailureLogged = false
+// The price refresh: at most one runs at a time, and a request that arrives
+// meanwhile waits in a single queued one. The models this load has asked a
+// refresh for are not asked for again, so a model no refresh can price does not
+// keep the refresh going.
+let isRefreshing = false
+let queuedRefresh = null
+let isRefreshFailureLogged = false
+let isPricesChanged = false
+const pricedModels = new Set()
 // Runs whose progress could not be read, each logged once.
 const loggedProgressFailures = new Set()
 // The agent ids this load has resolved: the type name for one of this plugin's
@@ -118,6 +135,7 @@ export function register(on) {
     bandTimer = $.clock.every(BAND_REFRESH_MS, () => {
       void refreshBand($)
     })
+    requestRefresh($, true)
     // Last, because a taken command name makes the call throw.
     try {
       await $.command.register({
@@ -131,6 +149,14 @@ export function register(on) {
     }
     return next(e)
   })
+
+  // A compaction can change what a session costs by way of a model it has not
+  // used before, so the prices are looked at again. The refresh runs on a timer:
+  // the compaction never waits for it.
+  on('session.compact', async ($, e, next) => {
+    if (isRefreshedByCompaction(e)) requestRefresh($, false)
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'mcp__agentcli__ask' }, async ($, e) => startTurn($, e, 'ask'))
   on('tool.call', { tool: 'mcp__agentcli__send' }, async ($, e) => startTurn($, e, 'send'))
@@ -323,33 +349,40 @@ async function checkJobs($) {
 
 async function showStatus($, bin, sessionId, running, terminal) {
   const hasRunEnded = terminal !== shownTerminal
-  if (hasRunEnded || isTokensRefreshDue) {
-    const tokens = await sessionTokens($, bin, sessionId)
+  if (hasRunEnded || isCostRefreshDue || isPricesChanged) {
+    // Taken before the read: a refresh that changes the prices during it is read
+    // by the next poll.
+    const hadPricesChanged = isPricesChanged
+    isPricesChanged = false
+    const cost = await sessionCost($, bin, sessionId)
     // A failed read leaves the key, so the next poll reads again.
-    if (tokens !== null) {
-      isTokensRefreshDue = hasRunEnded
+    if (cost === null) {
+      isPricesChanged = isPricesChanged || hadPricesChanged
+    } else {
+      isCostRefreshDue = hasRunEnded
       shownTerminal = terminal
-      shownTokens = tokens
+      shownCost = cost
     }
   }
-  const text = statusLine(statusText(running), shownTokens)
+  const text = statusLine(statusText(running), shownCost)
   if (text !== shownStatus) {
     shownStatus = text
     $.ui.status(text)
   }
 }
 
-// sessionTokens is the status line's token text, undefined when no run
-// reported usage, or null when the count could not be read (logged once).
-async function sessionTokens($, bin, sessionId) {
+// sessionCost is the status line's cost text, undefined when no run could be
+// priced, or null when the cost could not be read (logged once).
+async function sessionCost($, bin, sessionId) {
   const reply = await $.process.run(sessionStatsCommand(bin, sessionId))
   if (reply.exitCode === 0) {
-    isTokensFailureLogged = false
-    return tokensText(reply.stdout)
+    isCostFailureLogged = false
+    askForPrices($, missingPrices(reply.stdout))
+    return costText(reply.stdout)
   }
-  if (!isTokensFailureLogged) {
-    isTokensFailureLogged = true
-    $.ui.log('could not read the session token count: ' + failureText(reply), { to: 'debug' })
+  if (!isCostFailureLogged) {
+    isCostFailureLogged = true
+    $.ui.log('could not read the session cost: ' + failureText(reply), { to: 'debug' })
   }
   return null
 }
@@ -385,6 +418,61 @@ async function showBand($, rows) {
   if (text === shownBand) return
   await $.state.set(HOOK_RUNS, rows)
   shownBand = text
+}
+
+// askForPrices asks for one refresh for the models that have no price in the
+// cache yet, each model once per load.
+function askForPrices($, models) {
+  const unasked = models.filter((model) => !pricedModels.has(model))
+  if (unasked.length === 0) return
+  for (const model of unasked) pricedModels.add(model)
+  requestRefresh($, false)
+}
+
+// requestRefresh asks for a price refresh and returns at once: the refresh runs
+// from a timer, never inside the hook or the poll that asked. Requests that
+// reach it before it starts, or while one runs, come to a single queued one.
+function requestRefresh($, hasMaxAge) {
+  queuedRefresh = mergeRefreshRequests(queuedRefresh, { hasMaxAge })
+  if (isRefreshing) return
+  isRefreshing = true
+  $.clock.after(0, () => {
+    void runRefreshes($)
+  })
+}
+
+async function runRefreshes($) {
+  try {
+    while (queuedRefresh !== null) {
+      const request = queuedRefresh
+      queuedRefresh = null
+      await refreshPrices($, request.hasMaxAge)
+    }
+  } finally {
+    isRefreshing = false
+  }
+}
+
+// refreshPrices runs one refresh. A change to the prices makes the next poll
+// read the session's cost again; a failure is logged once until one succeeds.
+async function refreshPrices($, hasMaxAge) {
+  let outcome
+  try {
+    const reply = await $.process.run(refreshCommand(shimPath($.plugin.root), hasMaxAge), { timeoutMs: REFRESH_TIMEOUT_MS })
+    outcome = refreshOutcome(reply)
+  } catch (error) {
+    outcome = { failure: messageOf(error), hasChanged: false }
+  }
+
+  if (outcome.failure === null) {
+    isRefreshFailureLogged = false
+    if (outcome.hasChanged) isPricesChanged = true
+    return
+  }
+  if (!isRefreshFailureLogged) {
+    isRefreshFailureLogged = true
+    $.ui.log('could not refresh the price list: ' + outcome.failure, { to: 'debug' })
+  }
 }
 
 async function readOutput($, bin, runId) {
@@ -551,15 +639,17 @@ async function* watchRun($, bin, runId, signal) {
 }
 
 // newProgress reads the run's progress entries from `from` on, and the run's
-// state. A read that fails shows nothing new, leaves `from` where it was and is
-// logged once per run: the wait goes on, and the answer does not depend on
-// progress.
+// state and cost so far (no cost key when the read failed). A read that fails
+// shows nothing new, leaves `from` where it was and is logged once per run: the
+// wait goes on, and the answer does not depend on progress.
 async function newProgress($, bin, runId, from) {
   let failure
   try {
     const reply = await $.process.run(progressCommand(bin, runId, from))
     const progress = reply.exitCode === 0 ? readProgress(reply.stdout) : null
-    if (progress !== null) return { next: progress.next, text: progress.entries.map(progressLine), state: progress.state }
+    if (progress !== null) {
+      return { next: progress.next, text: progress.entries.map(progressLine), state: progress.state, cost: progress.cost }
+    }
     failure = failureText(reply)
   } catch (error) {
     failure = messageOf(error)

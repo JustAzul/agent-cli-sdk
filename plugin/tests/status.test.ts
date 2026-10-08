@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { POLL_MS, SESSION, job, listing, ok, world } from './kit'
+import { POLL_MS, SESSION, job, listing, ok, otherRuns, world } from './kit'
 
 const START = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 
@@ -38,12 +38,12 @@ test('the poll lists this session only, every fifteen seconds', async ($, on) =>
   await $.session.start(START)
 
   await w.clock.advance(POLL_MS - 1)
-  expect(w.runs.length).toBe(0)
+  expect(otherRuns(w).length).toBe(0)
   await w.clock.advance(1)
-  expect(w.runs.length).toBe(1)
-  expect(w.runs[0]!.argv.slice(1)).toEqual(['status', '--json', '--session-id', SESSION])
+  expect(otherRuns(w).length).toBe(1)
+  expect(otherRuns(w)[0]!.argv.slice(1)).toEqual(['status', '--json', '--session-id', SESSION])
   await w.clock.advance(POLL_MS)
-  expect(w.runs.length).toBe(2)
+  expect(otherRuns(w).length).toBe(2)
 })
 
 test('a tick is skipped while the previous one is still running', async ($, on) => {
@@ -56,7 +56,7 @@ test('a tick is skipped while the previous one is still running', async ($, on) 
 
   await w.clock.advance(POLL_MS * 3)
 
-  expect(w.runs.length).toBe(1)
+  expect(otherRuns(w).length).toBe(1)
 })
 
 test('a failing poll does not stop the next one', async ($, on) => {
