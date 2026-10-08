@@ -18,6 +18,9 @@ func NewRunID(now time.Time) string { return newID("r", now) }
 // NewConversationID returns a generated conversation id: c-<same shape>.
 func NewConversationID(now time.Time) string { return newID("c", now) }
 
+// NewCallID returns a generated model-call id: m-<same shape>.
+func NewCallID(now time.Time) string { return newID("m", now) }
+
 func newID(prefix string, now time.Time) string {
 	var b [4]byte
 	if _, err := rand.Read(b[:]); err != nil {

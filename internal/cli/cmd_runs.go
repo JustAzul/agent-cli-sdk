@@ -79,20 +79,10 @@ func foldWindow(ctx *Context, w window) (telemetry.Folded, int) {
 		return telemetry.Folded{}, ctx.Fail(ExitInternal, "reading telemetry: %v", err)
 	}
 	if w.sessionID != "" {
-		folded.Runs = inSession(folded.Runs, w.sessionID)
+		folded.Runs = telemetry.InSession(folded.Runs, w.sessionID)
+		folded.ModelCalls = telemetry.InSession(folded.ModelCalls, w.sessionID)
 	}
 	return folded, 0
-}
-
-// inSession keeps the runs recorded with the given session id.
-func inSession(runs []map[string]any, sessionID string) []map[string]any {
-	kept := []map[string]any{}
-	for _, run := range runs {
-		if id, _ := run["session_id"].(string); id == sessionID {
-			kept = append(kept, run)
-		}
-	}
-	return kept
 }
 
 func runRuns(ctx *Context, args []string) int {

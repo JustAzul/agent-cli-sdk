@@ -38,11 +38,15 @@ func TestGeneratedIDs(t *testing.T) {
 	now := time.Date(2026, 10, 4, 23, 15, 0, 0, time.UTC)
 	r := store.NewRunID(now)
 	c := store.NewConversationID(now)
+	m := store.NewCallID(now)
 	if !regexp.MustCompile(`^r-20261004T231500Z-[0-9a-f]{8}$`).MatchString(r) {
 		t.Errorf("run id %q", r)
 	}
 	if !regexp.MustCompile(`^c-20261004T231500Z-[0-9a-f]{8}$`).MatchString(c) {
 		t.Errorf("conversation id %q", c)
+	}
+	if !regexp.MustCompile(`^m-20261004T231500Z-[0-9a-f]{8}$`).MatchString(m) {
+		t.Errorf("call id %q", m)
 	}
 	if r == store.NewRunID(now) {
 		t.Error("ids must differ")

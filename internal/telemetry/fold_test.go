@@ -190,3 +190,106 @@ func TestFoldWithNonObjectAttrsStartsEmpty(t *testing.T) {
 		t.Errorf("runs = %v", f.Runs)
 	}
 }
+
+func callLine(id, ts, session string) string {
+	return `{"v":1,"kind":"model_call","call_id":"` + id + `","ts":"` + ts + `","session_id":"` + session +
+		`","provider":"anthropic","model":"claude-haiku-5-5","source":"mod-summary","run_id":null,` +
+		`"usage":{"input_tokens":458,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":18,"reasoning_output_tokens":0}}`
+}
+
+func TestFoldKeepsModelCallsApartFromRuns(t *testing.T) {
+	home := t.TempDir()
+	writeMonth(t, home, "2026-10",
+		runLine("r1", "2026-10-02T00:00:00Z", `{}`),
+		callLine("m1", "2026-10-02T00:00:01Z", "s1"),
+		`{"v":1,"kind":"model_call","call_id":"m1","ts":"2026-10-02T00:00:02Z","session_id":"s2","provider":"anthropic","model":"other"}`,
+		callLine("m2", "2026-10-02T00:00:03Z", "s1"))
+	f, err := telemetry.Fold(home, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Runs) != 1 || f.Runs[0]["run_id"] != "r1" {
+		t.Errorf("runs = %v", f.Runs)
+	}
+	var ids []string
+	for _, c := range f.ModelCalls {
+		ids = append(ids, c["call_id"].(string))
+	}
+	if !reflect.DeepEqual(ids, []string{"m1", "m2"}) {
+		t.Fatalf("call ids = %v", ids)
+	}
+	if f.ModelCalls[0]["session_id"] != "s1" || f.ModelCalls[0]["model"] != "claude-haiku-5-5" {
+		t.Errorf("the repeated call_id did not keep the first: %v", f.ModelCalls[0])
+	}
+	usage, _ := f.ModelCalls[0]["usage"].(map[string]any)
+	if usage["input_tokens"] != json.Number("458") {
+		t.Errorf("usage = %v", f.ModelCalls[0]["usage"])
+	}
+	if f.Skipped.Total() != 0 {
+		t.Errorf("skipped = %+v", f.Skipped)
+	}
+}
+
+func TestFoldCountsIncompleteModelCallsUnparseable(t *testing.T) {
+	home := t.TempDir()
+	writeMonth(t, home, "2026-10",
+		`{"v":1,"kind":"model_call","ts":"2026-10-02T00:00:00Z","provider":"anthropic","model":"m"}`,
+		`{"v":1,"kind":"model_call","call_id":"","ts":"2026-10-02T00:00:00Z","provider":"anthropic","model":"m"}`,
+		`{"v":1,"kind":"model_call","call_id":"a","provider":"anthropic","model":"m"}`,
+		`{"v":1,"kind":"model_call","call_id":"b","ts":"2026-10-02T00:00:00Z","model":"m"}`,
+		`{"v":1,"kind":"model_call","call_id":"c","ts":"2026-10-02T00:00:00Z","provider":"anthropic"}`,
+		`{"v":1,"kind":"model_call","call_id":"d","ts":"2026-10-02T00:00:00Z","provider":"anthropic","model":""}`,
+		`{"v":1,"kind":"model_callx","call_id":"e","ts":"2026-10-02T00:00:00Z","provider":"anthropic","model":"m"}`)
+	f, err := telemetry.Fold(home, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.ModelCalls) != 0 {
+		t.Errorf("model calls = %v", f.ModelCalls)
+	}
+	if want := (telemetry.Skipped{UnknownKind: 1, Unparseable: 6}); f.Skipped != want {
+		t.Errorf("skipped = %+v, want %+v", f.Skipped, want)
+	}
+}
+
+func TestFoldWindowFiltersModelCallsByTS(t *testing.T) {
+	home := t.TempDir()
+	writeMonth(t, home, "2026-09",
+		callLine("before", "2026-09-10T00:00:00Z", "s1"),
+		callLine("edge", "2026-09-20T00:00:00Z", "s1"))
+	writeMonth(t, home, "2026-10", callLine("new", "2026-10-02T00:00:00Z", "s1"))
+	since := time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)
+	f, err := telemetry.Fold(home, &since)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, c := range f.ModelCalls {
+		ids = append(ids, c["call_id"].(string))
+	}
+	if !reflect.DeepEqual(ids, []string{"edge", "new"}) {
+		t.Errorf("call ids = %v", ids)
+	}
+}
+
+func TestInSessionKeepsOnlyTheSessionsRecords(t *testing.T) {
+	home := t.TempDir()
+	writeMonth(t, home, "2026-10",
+		callLine("a", "2026-10-02T00:00:00Z", "s1"),
+		callLine("b", "2026-10-02T00:00:01Z", "s2"),
+		callLine("c", "2026-10-02T00:00:02Z", "s1"))
+	f, err := telemetry.Fold(home, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, c := range telemetry.InSession(f.ModelCalls, "s1") {
+		ids = append(ids, c["call_id"].(string))
+	}
+	if !reflect.DeepEqual(ids, []string{"a", "c"}) {
+		t.Errorf("call ids = %v", ids)
+	}
+	if got := telemetry.InSession(f.ModelCalls, "nope"); got == nil || len(got) != 0 {
+		t.Errorf("no match = %#v, want an empty non-nil slice", got)
+	}
+}

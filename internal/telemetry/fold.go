@@ -29,8 +29,9 @@ func (s Skipped) Total() int { return s.UnknownKind + s.UnknownVersion + s.Unpar
 // the order the run records were appended, plus what was skipped. Numbers are
 // json.Number so integers survive untouched.
 type Folded struct {
-	Runs    []map[string]any
-	Skipped Skipped
+	Runs       []map[string]any
+	ModelCalls []map[string]any
+	Skipped    Skipped
 }
 
 var monthFileName = regexp.MustCompile(`^\d{4}-\d{2}\.jsonl$`)
@@ -56,7 +57,8 @@ func MonthFiles(home string) ([]string, error) {
 }
 
 // Fold reads the month files under home, oldest month first and lines in file
-// order, and folds annotations into their runs. A run's attrs start from its
+// order, and folds annotations into their runs. Model-call records are kept
+// apart in ModelCalls. A run's attrs start from its
 // run record; each annotation then shallow-merges its attrs on top, one
 // top-level key at a time, later wins, null stored as a value. Annotations
 // are folded before the window filter, which applies to the run's ts.
@@ -69,7 +71,9 @@ func MonthFiles(home string) ([]string, error) {
 // still runs) is applied once the record arrives. An annotation whose run was
 // never read creates nothing. Lines with an unknown v or kind, and lines that
 // are not usable JSON objects, are skipped and counted; v is checked first.
-// When the same run_id has several run records, the first one wins.
+// When the same run_id has several run records, the first one wins; so does
+// the first of several model calls with the same call_id. A model call needs a
+// call_id, ts, provider and model, and takes the same ts window as a run.
 func Fold(home string, since *time.Time) (Folded, error) {
 	files, err := MonthFiles(home)
 	if err != nil {
@@ -79,7 +83,7 @@ func Fold(home string, since *time.Time) (Folded, error) {
 	if since != nil {
 		startMonth = since.UTC().Format("2006-01")
 	}
-	f := &folder{index: map[string]int{}, pending: map[string][]map[string]any{}}
+	f := &folder{index: map[string]int{}, calls: map[string]bool{}, pending: map[string][]map[string]any{}}
 	for _, name := range files {
 		if name[:7] < startMonth {
 			continue
@@ -99,14 +103,26 @@ func Fold(home string, since *time.Time) (Folded, error) {
 		}
 		out.Runs = append(out.Runs, run)
 	}
+	for _, call := range f.modelCalls {
+		if since != nil {
+			ts, _ := call["ts"].(string)
+			t, ok := ParseTS(ts)
+			if !ok || t.Before(*since) {
+				continue
+			}
+		}
+		out.ModelCalls = append(out.ModelCalls, call)
+	}
 	return out, nil
 }
 
 type folder struct {
-	runs    []map[string]any
-	index   map[string]int
-	pending map[string][]map[string]any
-	skipped Skipped
+	runs       []map[string]any
+	modelCalls []map[string]any
+	calls      map[string]bool
+	index      map[string]int
+	pending    map[string][]map[string]any
+	skipped    Skipped
 }
 
 func (f *folder) readFile(path string) error {
@@ -134,6 +150,18 @@ func forEachLine(path string, fn func(line []byte)) error {
 			return err
 		}
 	}
+}
+
+// InSession keeps the records (runs or model calls) recorded with the given
+// session id. The result is never nil.
+func InSession(records []map[string]any, sessionID string) []map[string]any {
+	kept := []map[string]any{}
+	for _, rec := range records {
+		if id, _ := rec["session_id"].(string); id == sessionID {
+			kept = append(kept, rec)
+		}
+	}
+	return kept
 }
 
 // RunIDs returns the run_id of every run record in every month file,
@@ -209,6 +237,19 @@ func (f *folder) foldLine(line []byte) {
 		} else {
 			f.pending[runID] = append(f.pending[runID], attrs)
 		}
+	case "model_call":
+		for _, key := range []string{"call_id", "ts", "provider", "model"} {
+			if v, _ := rec[key].(string); v == "" {
+				f.skipped.Unparseable++
+				return
+			}
+		}
+		callID := rec["call_id"].(string)
+		if f.calls[callID] {
+			return
+		}
+		f.calls[callID] = true
+		f.modelCalls = append(f.modelCalls, rec)
 	default:
 		f.skipped.UnknownKind++
 	}
