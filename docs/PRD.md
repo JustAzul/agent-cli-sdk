@@ -1,7 +1,7 @@
 # Product Requirements Document
 
 **Project / Feature**: agentcli (`agentcli`)
-**Date**: 2026-10-04
+**Date**: 2026-10-04 (updated 2026-10-08: session cost, group Q)
 
 ---
 
@@ -25,6 +25,7 @@ A single static Go binary, `agentcli`, that is the only way any consumer talks t
 - **`stats` parity on imported history:** 100% equality, against the retired analyzer over the same legacy file, for every key the retired analyzer emits.
 - **Wrapper overhead:** ≤ 50 ms p50 added wall time for a foreground run against a no-op fake provider. *Assumption: needs validation by benchmark. Measured interpreter startups for comparison: bash+jq ≈ 10 ms, python ≈ 25 ms, node ≈ 21 ms.*
 - **Runtime dependencies for plugin users:** 0 beyond the provider CLI itself. Verified in a clean container that has no Go, Python, Node or jq.
+- **Session cost exactness:** 0 difference, at 6 decimal places, between the `cost_usd` that `stats` reports and an independent exact recomputation under FR74 from the same run usage and cached prices. Verified on fixed fixtures in the test suite and once on the owner's telemetry.
 
 ---
 
@@ -44,6 +45,7 @@ Observed in the owner's telemetry (1,000 records, 2026-09-11 to 2026-10-05): 961
 - History older than about three weeks is gone.
 - Claude can only fire one-shot prompts. It cannot hold a conversation with another agent or be told when background work finishes.
 - The plugin `bin/` directory reaches Claude's Bash tool but not settings hooks (Observed), so shell automation cannot rely on it.
+- A token count says little about what a session would cost: most input is read from the prompt cache at a tenth of the input price or less (Observed: 84.7% of all recorded input tokens on 2026-10-08), so the same count can mean very different amounts.
 
 ### Business Case
 Cross-model review is a recurring part of the owner's workflow: about 42 dispatches per day (Inferred: 1,000 observed records over 24 days). A single, observable, extensible dispatch layer turns that from three fragile scripts into one maintained tool, makes cost and reliability measurable, and opens the path to more providers without touching consumers.
@@ -55,7 +57,8 @@ Cross-model review is a recurring part of the owner's workflow: about 42 dispatc
 ### In Scope
 - The `agentcli` binary: CLI surface, provider interface, Codex adapter, conversations, jobs, run artifacts, telemetry, profiles, launcher.
 - Distribution as a Claude Code plugin from a new public repository: marketplace manifest on the default branch, prebuilt plugin on a CI-built `dist` branch.
-- A thin mod: one agent type per scenario that dispatches show as native background agents, native tools for Claude, job-completion notices, a status line with running jobs and the session's tokens, a `/agentcli-jobs` command, and a band above the prompt that shows the runs other callers flag.
+- A thin mod: one agent type per scenario that dispatches show as native background agents, native tools for Claude, job-completion notices, a status line with running jobs and the session's cost in US dollars, a `/agentcli-jobs` command, and a band above the prompt that shows the runs other callers flag.
+- A local price cache, refreshed from a public price list and holding only the models the providers offer or have run, from which `stats` and the status line compute cost (group Q).
 - A provider-agnostic dispatch skill (a rewrite of the current Codex skill) with evals.
 - Migration of every live consumer in the owner's private configuration, import of the legacy telemetry, and removal of the old wrapper and skill.
 - Installation on the owner's machine and end-to-end validation (real per-scenario smokes, a real post-commit hook review).
@@ -70,6 +73,8 @@ Cross-model review is a recurring part of the owner's workflow: about 42 dispatc
 - Concurrency caps, queues or a resident daemon.
 - The dormant proof-of-concept that references the old wrapper path.
 - Fixing why the reflection hook fails so often. v1 only makes the failure reason visible.
+- Subscription credits. Session cost is the API list-price equivalent in US dollars, whatever the provider's sign-in method.
+- Long-context, Fast, Flex and Batch pricing. Cost uses the standard tier's short-context prices.
 
 ### MVP Definition
 Every P0 row in FR groups A–N. The mod (group K) is part of v1 but is built after the CLI core (groups A–H) is complete and verified. P1 rows (FR10, FR17, FR36) are wanted but do not gate v1. v1 is done when every P0 FR is met, the per-scenario smokes and the post-commit E2E pass, the old wrapper is deleted, and both repositories are pushed.
@@ -164,6 +169,19 @@ Acceptance Criteria:
 - [ ] The stats slash command runs `agentcli stats`
 ```
 
+```
+US8 — Session cost at a glance
+As the owner, working in a Claude Code session
+I want the status line to show what the session's agent runs would cost at API list prices
+So that I know the cost even on a subscription, without reading token counts
+
+Acceptance Criteria:
+- [ ] With prices cached, the status line shows `Codex $X.XX` for every run of the session, hook runs included
+- [ ] When part of the session's usage has no price it shows `Codex ≥$X.XX`; when none of it has, it shows nothing for Codex
+- [ ] Compacting the main conversation refreshes the price cache without delaying the compaction
+- [ ] `agentcli stats --session-id <id> --all --json` reports the same cost, exact to 6 decimal places
+```
+
 ### Functional Requirements
 
 #### A. CLI surface and exit contract
@@ -174,7 +192,7 @@ Acceptance Criteria:
 | FR2 | `agentcli review` runs a provider review against exactly one target: `--base <branch>`, `--uncommitted` or `--commit <sha>`. It accepts no prompt. A prompt with a target is refused before spawning, with exit 2. | P0 |
 | FR3 | `agentcli send <conversation_id or run_id>` runs the next turn of the referenced conversation. A run id resolves to its conversation. Prompt sources are as in FR1. | P0 |
 | FR4 | Common flags on exec/review/send: `--provider` (default `codex`), `--scenario` (default `adhoc`), `--effort`, `--model`, `--sandbox` (`read-only` or `workspace-write`), `--cwd`, `--source` (default `cli`), `--session-id` (default the `CLAUDE_CODE_SESSION_ID` environment value, else empty), `--timeout <seconds>` (default none), `--run-id`, `--clean-sentinel`, `--material-label` (default `ok`), `--attr key=value` (repeatable), `--attr-json key=<json>` (repeatable), `--background`, `--json`, and `--` followed by native provider flags. | P0 |
-| FR5 | Foreground contract. **Strategy:** without `--json`, stdout carries exactly one line, the absolute path of the run's output file (so it is also the last line). Warnings and progress go to stderr. The process exit code is the provider's exit code, except for these SDK codes: 2 usage error detected before spawning; 3 conversation busy; 4 run or conversation not found; 6 conversation not resumable; 70 internal SDK error; 124 provider timeout; 125 job lost; 127 provider binary not found; 130 run cancelled by request (FR24); 128+n when `agentcli` itself is terminated by signal n. With `--json`, stdout is one JSON object with `conversation_id`, `run_id`, `state`, `outcome`, `sdk_status`, `provider_exit`, `exit_code`, `output_path` and `run_dir`, so a provider exit 2 is distinguishable from an SDK usage error. | P0 |
+| FR5 | Foreground contract. **Strategy:** without `--json`, stdout carries exactly one line, the absolute path of the run's output file (so it is also the last line). Warnings and progress go to stderr. The process exit code is the provider's exit code, except for these SDK codes: 2 usage error detected before spawning; 3 conversation busy; 4 run or conversation not found; 6 conversation not resumable; 7 price list unavailable (FR72); 70 internal SDK error; 124 provider timeout; 125 job lost; 127 provider binary not found; 130 run cancelled by request (FR24); 128+n when `agentcli` itself is terminated by signal n. With `--json`, stdout is one JSON object with `conversation_id`, `run_id`, `state`, `outcome`, `sdk_status`, `provider_exit`, `exit_code`, `output_path` and `run_dir`, so a provider exit 2 is distinguishable from an SDK usage error. | P0 |
 | FR6 | `--background` admits a job and returns. **Strategy:** exit 0 once the worker is confirmed running. The last stdout line is the job id. With `--json`, stdout carries `{conversation_id, run_id, state, run_dir, output_path}`. | P0 |
 | FR7 | `agentcli status [run_id] [--session-id <id>] [--json]` prints one run's state, or with no id the active and recent runs of the given session id (default as in FR4; most recent 20, foreground and jobs). `agentcli wait <run_id> [--timeout <seconds>] [--json]` blocks until the run is terminal, then prints like FR5 for that run and exits with the run's recorded exit code. If its own timeout expires first, it exits 5 and leaves the run running. `agentcli result <run_id>` prints the output file's content. `agentcli cancel <run_id>` requests cancellation (FR24). `agentcli conversations [--json]` lists conversations with provider, turn count, status and last activity. | P0 |
 | FR8 | `--dry-run` on exec/review/send resolves profile, flags, conversation and provider plan, prints the plan (argv, stdin source, cwd, environment additions) as JSON, and executes nothing. No run directory, conversation or telemetry is created. | P0 |
@@ -234,7 +252,7 @@ Acceptance Criteria:
 | FR32 | `agentcli annotate <run_id or output path> --attr key=value --attr-json key=<json>` appends an annotation record `{v, kind: "annotation", run_id, ts, attrs}`. An unknown run id exits 4. | P0 |
 | FR33 | Fold rules for every reader. **Strategy:** read month files in ascending order and lines in file order; that append order is the replay order. A windowed read covers every month file from the window start's month through the current month (a run's record is always appended at or after its `ts`). A run's `attrs` start from its run record. Each later annotation for the same run shallow-merges its attrs into it, one top-level key at a time, later value wins, and `null` is stored as a value (not a deletion). Annotations are folded before any date filter; the filter applies to the run's `ts`. An annotation that precedes its run record in append order (a job annotated while running) is applied once that record is read; one whose run never appears creates nothing. Records with an unknown `v` or `kind`, and unparseable lines, are skipped and counted: `runs` reports the counts in one stderr line, `stats --json` in a `skipped` object (`unknown_kind`, `unknown_version`, `unparseable`). | P0 |
 | FR34 | `agentcli runs [--days N or --all] [--json]` emits folded runs as JSONL (default window 7 days), one object per run, for ad-hoc analysis with `jq`. | P0 |
-| FR35 | `agentcli stats [--days N or --all] [--json]` (default window 7 days) emits the same top-level keys and value semantics as the retired analyzer: `total`, `empty`, `span`, `by_source`, `by_source_status`, `instrumentation`, `reliability`, `outcomes`, `duration_ms`, `findings`, `review_findings_proxy`, `window_days`. **Strategy:** a run's legacy-style `status` is derived from its outcome (`error`, `timeout`, `cancelled`, `lost` → `error`; `empty` → `empty-output`; others → `ok`), except imported records, which keep their original `status`. A null outcome (imported records that predate it) counts as `no-outcome`. The findings summary reads `attrs["review.findings"]`, or `findings` on imported records. It adds `by_provider` and `usage_totals` keys. | P0 |
+| FR35 | `agentcli stats [--days N or --all] [--json]` (default window 7 days) emits the same top-level keys and value semantics as the retired analyzer: `total`, `empty`, `span`, `by_source`, `by_source_status`, `instrumentation`, `reliability`, `outcomes`, `duration_ms`, `findings`, `review_findings_proxy`, `window_days`. **Strategy:** a run's legacy-style `status` is derived from its outcome (`error`, `timeout`, `cancelled`, `lost` → `error`; `empty` → `empty-output`; others → `ok`), except imported records, which keep their original `status`. A null outcome (imported records that predate it) counts as `no-outcome`. The findings summary reads `attrs["review.findings"]`, or `findings` on imported records. It adds the keys `by_provider`, `usage_totals`, `usage_by_model` (FR70), `skipped` (FR33), `unpriced_models`, `missing_prices` and `prices_checked_at` (FR75), and no other. | P0 |
 | FR36 | Consumer attribute keys are namespaced by convention, e.g. `review.findings`. A key is any string. The value is any JSON value. | P1 |
 | FR37 | Legacy import (a maintenance script in the repository, not a CLI subcommand). **Strategy:** read the legacy file line by line. Each line becomes a run record with `v: 1`, `kind: "run"`, `provider: "codex"`, `run_id: "legacy-" + first 16 hex of sha256(raw line + "\n" + zero-based occurrence index of that exact line within the file)`, the legacy fields mapped by name (fields the legacy record lacks, such as `command`, are null), `findings` moved to `attrs["review.findings"]`, `attrs.legacy: true`, and the record placed into the month file of its `ts`. A record whose `run_id` already exists is skipped, which makes the import idempotent. The import holds the telemetry lock for its duration. | P0 |
 
@@ -314,14 +332,27 @@ Acceptance Criteria:
 | FR67 | An agentcli subagent's row shows its run as it works: the step hook waits in 5-second slices and streams each slice's new progress as thinking (shown, not recorded), with an elapsed-time line after 30 seconds with no new progress. | P0 |
 | FR68 | `exec`, `review` and `send` take `--agent-feedback`; `AGENTCLI_AGENT_FEEDBACK=1` sets its default. The run records `agent_feedback` in `request.json` and `status --json`. It needs a session id: without one the run goes ahead with `agent_feedback: false` and one stderr line saying why. | P0 |
 | FR69 | A run of the session with `agent_feedback: true`, not started by the agent types and not yet terminal, shows in a band above the prompt (a `ui.render` hook on `AbovePrompt`): one line per run with its scenario, its source, how long it has run and its newest progress entry (FR66). The 15-second poll finds the runs; the band reads their progress again every 5 seconds and drops a run as soon as a read finds it ended. The lines live in the session's own state (`hookRuns`), so a write redraws the band and a reload keeps it. Only the person sees the band: nothing about the run reaches Claude, and the caller that started it delivers its result. **Strategy:** a band rather than an agent row. An agent spawned in a chain that the mod's own timer started steps past the mod's hooks, so a model, not the mod, would answer it; only another plugin's timer can spawn a row the mod answers, and the band keeps the feature in this one plugin. | P0 |
-| FR70 | Each run record carries `model_used` and `effort_used`, what the provider reports it ran with, read before the run releases its conversation (for codex, the last `turn_context` of its session file; null when there is none). `stats` adds `usage_by_model`; `stats` and `runs` take `--session-id`. The status line adds the session's token use (`Codex <in> in · <out> out`), read again only when another of its runs ends. | P0 |
+| FR70 | Each run record carries `model_used` and `effort_used`, what the provider reports it ran with, read before the run releases its conversation (for codex, the last `turn_context` of its session file; null when there is none). `stats` adds `usage_by_model`; `stats` and `runs` take `--session-id`. The status line adds the session's cost (FR78), read again when another of its runs ends and after a price refresh that changed the cache (FR77). | P0 |
+
+#### Q. Session cost
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR71 | Price cache. `prices.json` under the home directory holds `v` (1), `source` (the URL it was fetched from), `etag` (the source's entity tag, or null), `fetched_at` (when a body was last downloaded), `checked_at` (when the source last answered a refresh, a 304 included), `unit` (`usd_per_1m_tokens`), `models` (provider → model → `{input, cached_input, cache_write, output}`, each a decimal string in US dollars per million tokens) and `unpriced` (provider → sorted list of wanted models the source gave no usable price). It is written atomically, with the home directory created when missing, and read by `stats` and `prices`. **Strategy:** prices are stored resolved: a cache-read price the source omits is stored as the input price, and a cache-write price the source omits, sets to null or sets to 0 is stored as the input price (the provider charges nothing extra for those writes). A file that cannot be parsed, or carries another `v`, is treated as no cache by every reader. | P0 |
+| FR72 | `agentcli prices refresh [--max-age <duration>] [--json]` updates the price cache from the LiteLLM price list (`https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json`), or from `AGENTCLI_PRICES_URL` when it is set. Usage errors (exit 2, below) are detected before anything else. **Strategy**, in order: (1) `AGENTCLI_PRICES_URL=off` → exit 0, `ran: false`, `reason: off`. (2) Take `prices.lock` without waiting; held → exit 0, `ran: false`, `reason: busy`. (3) With `--max-age`, a cache whose `checked_at` is younger than the duration → exit 0, `ran: false`, `reason: fresh`; this decision reads the price cache and nothing else. (4) Wanted models, per provider: the provider's catalog (FR76) plus every distinct model of that provider's runs in the whole telemetry (`model_used`, else `model`; empty and `unknown` excluded). A catalog that cannot be read leaves the telemetry models and is reported in `catalog_error`. When no provider has a wanted model, exit 0 with `ran: false`, `reason: nothing_wanted`, no request and no write. (5) GET the source accepting gzip, with a 20-second timeout and a 32 MiB limit on the decoded body. `If-None-Match` carries the cached `etag` only when the cached `source` equals the current one and every wanted model is already in the cache's `models` or `unpriced`. A 304 updates `checked_at` only (`changed: false`, `reason: not_modified`). (6) On a 200, each wanted model takes the entry whose key equals its name exactly and whose `litellm_provider` equals the provider's price namespace (FR76); the models of a provider that declares no catalog, and so no namespace, are unpriced. That entry's `input_cost_per_token` and `output_cost_per_token` must be JSON numbers, otherwise the model is unpriced; `cache_read_input_token_cost` and `cache_creation_input_token_cost` are optional. Every price is parsed from its JSON text as an exact rational and multiplied by 1,000,000, never through binary floating point. (7) When no wanted model got a price, exit 7 and leave the cache untouched. Otherwise write the cache and exit 0 with `ran: true`, `reason: updated`, and `changed` true exactly when `models` or `unpriced` differ from the previous cache. A network error, a timeout, a status other than 200 or 304, a body over the limit or unparseable JSON also exits 7 with the cache untouched. With `--json`, stdout is one object `{sdk_status, exit_code, ran, changed, reason, source, checked_at, priced, unpriced, catalog_error}`, where `priced`, `unpriced` and `checked_at` describe the cache as it stands after the call (`priced` and `unpriced` as sorted `provider/model` lists, empty with no cache, and `checked_at` null with no cache) and an exit 7 carries `sdk_status: prices_unavailable`, `reason: unavailable` and `error`. Without `--json`, stdout is one line `prices: <reason> (<n> priced, <m> unpriced)`, and an exit 7 prints `agentcli: <error>` on stderr instead. A `--max-age` that is not a positive duration such as `24h` or `90m`, an unknown flag or a positional argument exits 2. | P0 |
+| FR73 | `agentcli prices [--json]` prints the price cache: its source, `fetched_at`, `checked_at`, each provider's models with their four prices, and the unpriced models. With `--json`, stdout is the cache's fields plus `cached: true`. With no usable cache, it exits 0 and prints `no price cache: run agentcli prices refresh` (`--json`: `{"cached": false}`). | P0 |
+| FR74 | Run cost. **Strategy:** for a run with usage whose provider and model (resolved as in FR72 step 4) have cached prices, with `i`, `c`, `w` and `o` its input, cached input, cache-write input and output tokens (a negative count read as 0): the written tokens are `W = w` when `w > 0`, else `W = max(0, i − c)`, because a provider that reports no cache writes is taken to have written every uncached input token, as implicit prompt caching does; the ordinary input is `max(0, i − c − W)`; the cost in US dollars is `(ordinary × input + c × cached_input + W × cache_write + o × output) / 1,000,000`. Reasoning tokens are part of output and are not added again. Every run is priced at its model's current cached prices, short-context standard tier, whatever its date. A run with usage whose model has no cached price is unpriced. Costs are summed as exact rationals and rounded once, half to even, to 6 decimal places when printed. | P0 |
+| FR75 | `stats` reports cost for its window and session filter. `usage_totals` and each `usage_by_model` entry add `cost_usd`: the FR74 sum over their priced runs, a decimal string with 6 decimal places, or null when none of their runs with usage is priced. `usage_totals` also adds `cost_complete`, true exactly when no run with usage is unpriced. The top level adds `unpriced_models` (the sorted models of unpriced runs, `unknown` included), `missing_prices` (the sorted subset that is in neither the cache's `models` nor its `unpriced` for the run's provider, `unknown` excluded) and `prices_checked_at` (the cache's `checked_at`, or null with no usable cache). Text output keeps the `tokens` lines without the cost keys and adds `cost: $X.XX`, followed by `(incomplete: <models>)` when not complete, and one `cost <model>: $X.XX` line per priced model, rounded half up to cents; a null cost prints no line. | P0 |
+| FR76 | A provider may declare a model catalog: the model names it offers and the namespace its entries use in the price list. **Strategy:** the codex adapter declares the namespace `openai` and reads its catalog by running `codex debug models` with the caller's environment and a 10-second timeout, taking each `models[].slug`. A failure to run it or to parse its output is reported by FR72 and never ends the refresh. | P0 |
+| FR77 | The mod refreshes prices without making any hook wait. **Strategy:** every refresh runs `prices refresh --json` inside a `$.clock.after(0, …)` callback, at most one at a time per load of the mod: a refresh requested while one is running is dropped, because the running one reads the same telemetry and source. `session.start` schedules one with `--max-age 24h`. `session.compact` with trigger `manual` or `auto` and no `agentId` schedules one without `--max-age` and returns `next(e)` at once; other triggers and subagent compactions schedule nothing. A stats read (FR78) whose `missing_prices` names a model this load has not yet refreshed for schedules one without `--max-age`, once per model per load; a request that was dropped does not count as that model's one refresh. A refresh that answers `ran: true` and `changed: true` makes the next poll read the session's stats again. A failed refresh is logged once to the debug log until one succeeds. | P0 |
+| FR78 | The status line shows the session's cost, read from `stats --session-id <id> --all --json` as in FR70, after the running-jobs count and joined to it by ` · `. **Strategy:** a null `cost_usd` shows nothing for Codex. A complete cost of at least half a cent shows `Codex $X.XX`, rounded half up; a complete cost above zero and below half a cent shows `Codex <$0.01`; a complete cost of zero shows `Codex $0.00`. An incomplete cost shows `Codex ≥$X.XX`, truncated to cents so it stays a lower bound. Rounding works on the decimal string with integer arithmetic, never through binary floating point. | P0 |
 
 ### Non-Functional Requirements
-- **Performance:** wrapper overhead within the success-metric target. Startup does not read the full telemetry history (only `runs`/`stats` do). Telemetry writes are one append. *Assumption: overhead target needs validation by benchmark.*
-- **Security:** never `danger-full-access`. Reserved native flags are blocked (FR14). Prompts and outputs stay local under the home directory with user-only permissions (directories 0700, files 0600). Telemetry never records the prompt text.
+- **Performance:** wrapper overhead within the success-metric target. Startup does not read the full telemetry history (only `runs`, `stats` and a `prices refresh` past its `--max-age` gate do; the gate itself reads only the price cache). Telemetry writes are one append. *Assumption: overhead target needs validation by benchmark.*
+- **Security:** never `danger-full-access`. Reserved native flags are blocked (FR14). Prompts and outputs stay local under the home directory with user-only permissions (directories 0700, files 0600). Telemetry never records the prompt text. The downloaded price list is untrusted input: its size is capped and its numbers are parsed strictly (FR72).
 - **Portability:** linux and darwin on amd64 and arm64. Static binaries with no cgo. POSIX `sh` for shims and the launcher.
 - **Reliability:** state transitions are atomic replaces. Telemetry survives crashes mid-write (FR30). A crashed worker is detected as `lost` (FR23). No path can leave a conversation permanently busy.
-- **Privacy:** FR44 for the public repository. No telemetry or artifact leaves the machine.
+- **Privacy:** FR44 for the public repository. No telemetry or artifact leaves the machine. The only network request is the unauthenticated GET of the public price list by `prices refresh`, which carries no user data.
 - **Accessibility:** not applicable. The product is a CLI, a mod drawing only a status line and toasts and otherwise using Claude Code's own agent rows, and a skill. No visual UI beyond Claude Code's own.
 - **Compatibility:** codex-cli 0.159.3 behaviours are the reference (Appendix A). Claude Code with mods and plugin `bin/` support (installed build 2.1.289).
 
@@ -334,7 +365,7 @@ Acceptance Criteria:
 2. Claude asks another agent: it calls the `ask` tool. The tool returns ids at once. Claude keeps working. When the job ends, a toast appears and a new turn brings the outcome and output.
 3. Claude follows up: `send` on the same conversation. The answer arrives the same way as turn 2.
 4. A hook reviews a commit: it runs `agentcli exec` in the foreground, gets the output path, decides what to surface, and annotates findings.
-5. The owner inspects: `agentcli stats` for the standing report, `agentcli runs --json | jq …` for any new question, `agentcli conversations` and `agentcli status` for live work.
+5. The owner inspects: the status line for the session's cost, `agentcli prices` for the cached prices, `agentcli stats` for the standing report, `agentcli runs --json | jq …` for any new question, `agentcli conversations` and `agentcli status` for live work.
 
 ### Design Considerations
 - One verb per intent (exec, review, send) and one id per thing (run/job id, conversation id).
@@ -349,9 +380,10 @@ Acceptance Criteria:
 ### Architecture Impact
 New public repository plus migration of the owner's private configuration. Deep modules, each behind a small interface:
 - **Runner:** plan → spawn → stream-parse → finalize, for foreground and worker modes alike.
-- **Provider adapter:** capabilities, plan building, event parsing. Adding a provider means adding one adapter.
+- **Provider adapter:** capabilities, plan building, event parsing, and an optional model catalog. Adding a provider means adding one adapter.
 - **Store:** runs, conversations, state files and their locks.
 - **Telemetry:** append, fold, `runs` export, `stats`.
+- **Prices:** the price cache, the price-list parser and the cost of a run (FR71–FR75), behind a small interface that `stats` and `prices` call.
 - **Launcher/link:** install resolution and the launcher file.
 
 The mod and the skill sit outside the binary and contain no dispatch logic.
@@ -363,6 +395,7 @@ Test external behaviour, not internals.
 - **Telemetry fold seam:** fold rules (ordering, month boundary, null values, unknown kinds, torn lines) tested as a module.
 - **Lifecycle:** job admission, cancel (queued and running), timeout with descendant processes, worker crash → lost, concurrent `send`. Runs on Linux in Docker and on macOS in CI.
 - **Mod:** Claude Code's plugin test runner.
+- **Prices and cost:** the CLI process against a loopback test server named by `AGENTCLI_PRICES_URL` and a fake provider that answers `debug models`. The cost rule, the decimal handling and the rounding are tested as a module against exact oracles. The mod's cost text and refresh triggers run in the plugin test runner.
 - **Consumers:** the existing hook test suites, updated to stub `AGENTCLI_BIN`.
 - **Real smokes:** FR57–FR59 on the owner's machine.
 - **Prior art:** the PATH-stub pattern used by the current hook suites and by the current wrapper's telemetry test.
@@ -373,6 +406,7 @@ Test external behaviour, not internals.
 - Claude Code with plugin `bin/`, settings hooks and mods (installed 2.1.289).
 - GitHub (public repository, Actions for CI on Linux and macOS runners).
 - Docker on the developer machine (golang image) for build and test. No language toolchain is installed on the host.
+- The LiteLLM price list on GitHub (public, no account), read by `prices refresh`.
 
 ### Risks & Mitigations
 | Risk | Impact | Mitigation |
@@ -384,6 +418,10 @@ Test external behaviour, not internals.
 | Prompts stored on disk contain sensitive content | Med | User-only permissions; same machine and trust as the provider's own session store; never in telemetry |
 | Process-group semantics differ on macOS | Med | Lifecycle tests on a macOS CI runner |
 | Hook exceeds its 600-second budget | High | FR26 bounded shutdown; FR30 bounded lock wait |
+| The price list changes its schema or renames models | Med | A refresh that prices no wanted model keeps the previous cache and exits 7 (FR72); `prices` shows what is cached and from where |
+| The price list carries a wrong price | Med | `prices` shows the source and every cached price; `AGENTCLI_PRICES_URL` can point at a corrected copy |
+| Estimated cache writes exceed real ones (a prefix too short to be cached) | Low | The rule is documented in FR74; a provider that reports writes is priced from what it reports |
+| The network blocks the price list's host | Low | `AGENTCLI_PRICES_URL` names a mirror or `off`; the last cache keeps working |
 
 ---
 
@@ -407,6 +445,14 @@ None. Deferred execution items, not decisions:
 - Marketplace plugin sources accept `github` with `ref` and optional `sha`.
 - Telemetry baseline: 1,000 records over 24 days, about 300 bytes each; median duration 24.4 s, max 815.9 s.
 
+Measured for session cost (2026-10-08, codex-cli 0.159.3):
+- Codex's `input_tokens` includes the cached and cache-write tokens, and its `output_tokens` includes the reasoning tokens: a session file's `total_tokens` equals input plus output, and Codex derives non-cached input as input minus cached. OpenAI's prompt-caching guide states the same partition: each input token is billed at the uncached, cached or cache-write rate, never twice.
+- OpenAI prices cache writes at 1.25× the uncached input price and cache reads at 0.1× (0.05× for gpt-6.1-sol) for GPT-5.6 and later; GPT-5.5 and earlier charge nothing extra for writes. In implicit caching mode, the guide's worked example writes every uncached input token of a request to the cache.
+- OpenAI list prices for gpt-6.1-sol per million tokens: $2 input, $0.10 cached input, $2.50 cache write, $10 output.
+- Under ChatGPT sign-in, every recorded run reports `cache_write_input_tokens: 0` (703 runs with usage), while cached input is 84.7% of all input.
+- `codex debug models` prints the model catalog as JSON in under 0.1 s. Of its 10 slugs, two (`gpt-reserve`, `codex-auto-review`) are not in the price list.
+- The LiteLLM price list (3.1 MB, about 154 KB gzipped) keys models by name with a `litellm_provider` field, gives prices per token as JSON numbers (for example `1e-07`), and is served with an ETag. Its prices for gpt-6-astra, gpt-6.1-sol and gpt-6-luna match OpenAI's list prices. Its gpt-5.5 entry has no cache-write price.
+
 ### B. Glossary
 - **run:** one provider invocation; the unit of artifacts, state and telemetry.
 - **job:** a run executed in the background; its id is its run id.
@@ -422,6 +468,12 @@ None. Deferred execution items, not decisions:
 - **outcome:** the classification of a finished run.
 - **annotation:** attributes appended to a run after the fact.
 - **attrs:** a run's free-form attribute map.
+- **price cache:** the local copy of the prices of the wanted models (FR71).
+- **wanted models:** the models a provider offers plus those its runs used (FR72).
+- **unpriced model:** a wanted model the price list gives no usable price, or a run's model with no cached price.
+- **missing price:** a model used by a run that the price cache lists neither as priced nor as unpriced.
+- **estimated cache write:** uncached input counted as written to the prompt cache when the provider reports no writes (FR74).
+- **session cost:** the FR74 cost of a Claude Code session's runs at API list prices.
 
 ### C. Prior art consulted
 - JamesPrial/go-plugin-release: orphan release branch for Go plugin binaries.

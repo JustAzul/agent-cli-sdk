@@ -1,11 +1,12 @@
 # Verification Checklist: agentcli (`agentcli`)
 
-**Date**: 2026-10-04
+**Date**: 2026-10-04 (updated 2026-10-08: session cost)
 **Status**: Draft
 
 Unless stated otherwise:
 - `AGENTCLI_HOME` points at a fresh temporary directory.
 - A fake `codex` is first on PATH. It replays a named recorded event stream (sanitized fixtures: `exec-ok`, `review-ok`, `resume-ok`, `error-400`), writes the `-o` file, and exits with a scripted code.
+- `AGENTCLI_PRICES_URL=off`, so no case reaches the network. Price cases point it at a loopback test server that serves a fixture price list.
 - "Real" cases use the installed codex-cli and are the FR57–FR59 smokes.
 
 ---
@@ -50,7 +51,7 @@ Unless stated otherwise:
 - [ ] **material label (FR28):** the fixture output is a findings list with `--material-label findings` → outcome `findings`.
 - [ ] **profiles (FR38):** `--scenario delegation` → plan has `-s workspace-write`, `-c model_reasoning_effort=medium`, `-m gpt-6.1-sol`. `--scenario delegation --effort high` → effort high with `effort_source: flag`.
 - [ ] **unknown scenario (FR38):** `--scenario claude-md-update` → no profile applied, record `scenario: claude-md-update`, sources `provider-default` unless flags are given.
-- [ ] **stats (FR35, US7):** with mixed records → `agentcli stats --all --json` has every key `total, empty, span, by_source, by_source_status, instrumentation, reliability, outcomes, duration_ms, findings, review_findings_proxy, window_days`, plus `by_provider` and `usage_totals`.
+- [ ] **stats (FR35, US7):** with mixed records → `agentcli stats --all --json` has every key `total, empty, span, by_source, by_source_status, instrumentation, reliability, outcomes, duration_ms, findings, review_findings_proxy, window_days`, plus `by_provider`, `usage_totals`, `usage_by_model`, `skipped`, `unpriced_models`, `missing_prices` and `prices_checked_at`, and no other key.
 - [ ] **version (FR10):** `agentcli version --json` → has `version`, `source_commit`, `build_seq` (integer > 0 for CI builds) and `platform`.
 - [ ] **link fresh (FR43, US5):** no launcher present → `agentcli link`.
   - It creates `~/.local/bin/agentcli` (directory created if missing), which executes the resolved install's `bin/agentcli` and carries its `build_seq`.
@@ -97,6 +98,123 @@ Unless stated otherwise:
 - [ ] **agent feedback flag (FR68):** `--agent-feedback --session-id s` → `agent_feedback: true` in `request.json` and `status --json`; `AGENTCLI_AGENT_FEEDBACK=1` likewise; with no session id the run exits 0, `agent_feedback: false`, and stderr says it was ignored.
 - [ ] **flagged run shown (FR69):** a hook starts a foreground `exec --agent-feedback` in the session → within one poll a line `agentcli · <scenario> · <source> · <elapsed> · <newest step>` appears above the prompt and follows what the run does; within 5 seconds of the run ending the line is gone. A run started by the agent types, or without the flag, gets no line. No agent row appears, no model request is made, and Claude receives nothing about the run.
 - [ ] **model used (FR70):** a run on the provider's default model records `model: null` and `model_used` equal to the model in the provider's session file; `stats --session-id s --json` counts only that session and lists its tokens under `usage_by_model`.
+
+---
+
+## Session cost and prices
+
+Fixtures for this section:
+- **Price list:** `testdata/prices/` serves a LiteLLM-shaped file with fictitious models. All have `litellm_provider: openai` except the last two.
+  - `m-sol`: input `2e-06`, cache read `1e-07`, cache creation `2.5e-06`, output `1e-05`.
+  - `m-old`: input `5e-06`, cache read `5e-07`, output `3e-05`; no cache creation.
+  - `m-bare`: input `1e-06`, output `4e-06`; no cache fields.
+  - `m-zero`: input `3e-06`, cache read `3e-07`, cache creation `0`, output `1.2e-05`.
+  - `m-half`: input `5e-07`, output `5e-07`.
+  - `m-text`: input as the string `"2e-06"`, output `1e-05`.
+  - `chatgpt/m-sol` (`litellm_provider: chatgpt`, prices null) and `m-azure` (`litellm_provider: azure`).
+- **Catalog:** `FAKECODEX_MODELS` lists `m-sol`, `m-old`, `m-bare` and `m-hidden`.
+- **Server:** the test server answers `ETag: "e1"` and returns 304 when `If-None-Match: "e1"` arrives. It records every request it receives.
+
+Expected cached prices (US dollars per million tokens):
+- `m-sol`: `{input "2", cached_input "0.1", cache_write "2.5", output "10"}`.
+- `m-old`: `{5, 0.5, 5, 30}`.
+- `m-bare`: `{1, 1, 1, 4}`.
+- `m-zero`: `{3, 0.3, 3, 12}`.
+
+### Happy path
+
+- [ ] **refresh writes the cache (FR71, FR72, FR76):** one telemetry run on `m-zero` → `agentcli prices refresh --json` exits 0.
+  - The JSON has `ran: true`, `reason: updated` and `changed: true`.
+  - `priced` is `[codex/m-bare, codex/m-old, codex/m-sol, codex/m-zero]` and `unpriced` is `[codex/m-hidden]`.
+  - `prices.json` holds the expected prices above, `etag` `"e1"` and `source` equal to the server URL.
+  - The file has mode 0600, and no `m-azure`, `chatgpt/m-sol` or `m-half` entry.
+  - The server saw one GET with no query string, no `Authorization` header and no cookie.
+  - The text form (no `--json`) prints exactly `prices: updated (4 priced, 1 unpriced)`.
+- [ ] **prices shows the cache (FR73):** after the refresh, `agentcli prices --json` → `cached: true` plus the cache's fields. The text form lists each model with its four prices and the unpriced models.
+- [ ] **run cost with estimated writes (FR74, FR75):** one run on `m-sol` with usage `input 1,000,000, cached 800,000, cache_write 0, output 10,000`.
+  - `stats --all --json` gives `usage_by_model.m-sol.cost_usd` `"0.680000"`: 200,000 estimated written tokens at $2.50, 800,000 cached at $0.10 and 10,000 output at $10.
+  - `cost_complete` is `true`.
+- [ ] **reported writes win (FR74):** the same run with `cache_write 50,000` → `"0.605000"`: 150,000 ordinary at $2, 800,000 cached, 50,000 written and the output.
+- [ ] **omitted cache prices (FR71, FR74):**
+  - `m-old` with `input 100,000, cached 60,000, output 1,000` → `"0.260000"`, the writes at the input price.
+  - `m-bare` with `input 10,000, cached 4,000, output 500` → `"0.012000"`.
+- [ ] **exact totals (FR74, FR75):** the `m-sol`, `m-old` and `m-bare` runs above together → `usage_totals.cost_usd` is `"0.952000"`. That equals the independent sum of the three oracles, with no rounding before the sum.
+- [ ] **reasoning not double-counted (FR74):** the `m-sol` run with `reasoning_output_tokens 5,000` added → its cost is unchanged.
+- [ ] **hook runs count (FR75, US8):** runs with `source` `hook-stop`, `hook-post-commit` and `cli`, all under session `S` → `stats --session-id S --all --json` prices all three.
+- [ ] **stats text (FR75):** for the three runs above:
+  - the `tokens:` lines carry no cost key;
+  - the output has `cost: $0.95`, plus `cost m-sol: $0.68`, `cost m-old: $0.26` and `cost m-bare: $0.01`.
+- [ ] **status line cost (FR78, US8):** stats answers `cost_usd "0.680000"` with `cost_complete: true` and one job running → the status line is `1 job running · Codex $0.68`. With no job running, it is `Codex $0.68`.
+- [ ] **status line rounding (FR78):**
+
+  | `cost_usd` | complete? | Status line |
+  |---|---|---|
+  | `"52.940726"` | yes | `Codex $52.94` |
+  | `"1.005000"` | yes | `Codex $1.01` |
+  | `"0.005000"` | yes | `Codex $0.01` |
+  | `"0.004999"` | yes | `Codex <$0.01` |
+  | `"0.000000"` | yes | `Codex $0.00` |
+  | `"52.949999"` | no | `Codex ≥$52.94` |
+  | `"0.004999"` | no | `Codex ≥$0.00` |
+  | null | — | nothing for Codex |
+
+- [ ] **refresh on compaction (FR77, US8):**
+  - A `session.compact` with trigger `manual`, then one with `auto`, both with no `agentId` → each hook resolves before its refresh process finishes, and each schedules one `prices refresh --json` with no `--max-age`.
+  - The triggers `precompute` and `plugin`, and any compaction with an `agentId`, schedule none.
+- [ ] **refresh on session start (FR77):** `session.start` → one `prices refresh --max-age 24h --json` runs from a timer callback, not inside the hook.
+- [ ] **re-read after a change (FR70, FR77):** a refresh answering `ran: true, changed: true` → the next poll runs `stats` again, even though no run ended.
+
+### Edge cases
+
+- [ ] **unpriced and missing (FR75):**
+  - Runs on `m-sol`, `m-hidden`, `m-new` (in no cache list) and one with no model → `cost_complete: false`.
+  - `unpriced_models` is `[m-hidden, m-new, unknown]` and `missing_prices` is `[m-new]`.
+  - `usage_totals.cost_usd` covers the `m-sol` run only.
+- [ ] **nothing priced (FR75, FR78):** with no cache, or only unpriced runs → `usage_totals.cost_usd` is null and the status line shows nothing for Codex. With no cache, `prices_checked_at` is null and `missing_prices` lists every model used except `unknown`.
+- [ ] **no usage (FR75):** a window whose runs all have null usage → `cost_usd` null and `cost_complete: true`.
+- [ ] **exact literals (FR72):** `m-sol`'s `1e-07` cache read is stored as `"0.1"`, not as a binary-float approximation.
+- [ ] **half to even (FR74):** with `m-half` wanted, one run with `input 1` → `"0.000000"`; one with `input 3` → `"0.000002"`.
+- [ ] **non-number price (FR72):** `m-text` wanted → listed as unpriced.
+- [ ] **wrong namespace ignored (FR72):** a wanted `m-azure` → unpriced, even though the list has an entry under that key. The `chatgpt/m-sol` key never matches `m-sol`.
+- [ ] **conditional request (FR72):** a refresh, then another → the second request carries `If-None-Match: "e1"`.
+  - It answers `ran: true, changed: false, reason: not_modified`.
+  - `checked_at` advances and `fetched_at` and `models` are unchanged.
+- [ ] **new model forces a full GET (FR72):** after a refresh, a telemetry run on `m-old2` (not in the cache) → the next request carries no `If-None-Match`, and `m-old2`, absent from the list, ends up in `unpriced`.
+- [ ] **source change forces a full GET (FR72):** the cache's `source` differs from `AGENTCLI_PRICES_URL` → no `If-None-Match`, and the new `source` is written.
+- [ ] **fresh cache skips everything (FR72):** with `checked_at` 1 hour old, `prices refresh --max-age 24h --json` → `ran: false, reason: fresh`. The server receives no request, and `FAKECODEX_RECORD` shows `codex` was not run.
+- [ ] **stale cache refreshes (FR72):** with `checked_at` 25 hours old, `--max-age 24h` → it refreshes.
+- [ ] **catalog fails (FR72, FR76):** `FAKECODEX_MODELS` unset → exit 0. Only the telemetry models are wanted, and `catalog_error` is non-empty.
+- [ ] **nothing wanted (FR72):** `FAKECODEX_MODELS` unset and no telemetry → exit 0, `ran: false, reason: nothing_wanted`. The server receives no request and no `prices.json` is written.
+- [ ] **ran false describes the cache (FR72):** `reason: fresh` on a cache that has 4 priced and 1 unpriced model → `priced` and `unpriced` list them, and `checked_at` equals the cache's. `reason: off` with no cache → empty lists and `checked_at: null`.
+- [ ] **usage errors come first (FR72):** `AGENTCLI_PRICES_URL=off agentcli prices refresh --max-age soon` → exit 2, not `reason: off`.
+- [ ] **corrupt cache (FR71):** `prices.json` holding `{` or `"v": 2` → `stats` reports null costs and `prices_checked_at: null`; `prices` reports `cached: false`; `refresh` makes a full GET and replaces the file.
+- [ ] **usage errors (FR72):** `prices refresh --max-age soon`, `--max-age -1h`, an unknown flag, or a positional argument → exit 2 with `sdk_status: usage_error`.
+- [ ] **compaction during a refresh (FR77):** a compaction arrives while a refresh is still running → it is dropped, and no second refresh process starts.
+- [ ] **missing price triggers once (FR77):** stats keeps answering `missing_prices: [m-new]` → exactly one refresh runs for `m-new` in this load.
+- [ ] **dropped request keeps its turn (FR77):** `missing_prices: [m-new]` arrives while another refresh is running → that request is dropped. The next stats read that still reports `m-new` starts its one refresh.
+
+### Failure and error handling
+
+- [ ] **list unavailable (FR5, FR72):** each of these cases → exit 7, `sdk_status: prices_unavailable`, `reason: unavailable`, a non-empty `error`, and `prices.json` byte-identical (or still absent). Without `--json`, stdout is empty and stderr has one `agentcli: …` line:
+  - the server is closed (connection refused);
+  - the server answers 500;
+  - the body is invalid JSON;
+  - the body has no wanted model;
+  - the body exceeds `AGENTCLI_TEST_PRICES_MAX_BYTES`;
+  - the server stalls past `AGENTCLI_TEST_PRICES_TIMEOUT_MS`.
+- [ ] **refresh switched off (FR72):** `AGENTCLI_PRICES_URL=off` → exit 0, `ran: false, reason: off`. No request is made and no file is created.
+- [ ] **lock held (FR72):** another process holds `prices.lock` → exit 0, `ran: false, reason: busy`, and the cache is unchanged.
+- [ ] **failed refresh in the mod (FR77):** two refreshes in a row exit 7 → one debug log line, not two. After one succeeds, the next failure logs again.
+
+### Idempotency
+
+- [ ] **refresh twice (FR72):** two refreshes with no change upstream → the second has `changed: false`, and `prices.json` differs only in `checked_at`.
+- [ ] **reload (FR77):** the mod reloads 3 times within an hour of a refresh → each `session.start` refresh answers `reason: fresh`, and the server receives no request.
+
+### Performance and limits
+
+- [ ] **refresh over a large history (FR72):** with 20,000 telemetry records, `prices refresh` completes. Record its wall time as a baseline.
+- [ ] **the age gate reads nothing else (FR72, NFR Performance):** with a fresh cache and an unreadable telemetry directory, `prices refresh --max-age 24h` exits 0 with `reason: fresh`.
 
 ## Edge Cases
 
@@ -225,4 +343,5 @@ Unless stated otherwise:
 - Lifecycle cases (timeout, cancel, lost, concurrent admissions) run on Linux in Docker and on the macOS CI runner.
 - Real-provider cases (FR57–FR59) run on the owner's machine and consume provider usage. They are not part of CI.
 - The mod cases require a Claude Code build with mods enabled. They run through the plugin test runner where possible and manually in a live session for the toast/turn behaviour.
+- A live `prices refresh` against the real price list, and the comparison of `stats` cost with an independent exact recomputation over the owner's telemetry (success metric), run on the owner's machine. They are not part of CI.
 - Fixtures are recorded from codex-cli 0.159.3 and sanitized (fictitious thread/session ids, neutral paths) before they enter the repository (FR44).

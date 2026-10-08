@@ -25,6 +25,7 @@ package boundaries so no slice invents its own version.
 | `internal/runner` | plan → spawn → stream-parse → finalize, for foreground and worker modes |
 | `internal/store` | home resolution, run directories, conversations, state files, locks |
 | `internal/telemetry` | record types, append, fold, `runs` export, `stats` |
+| `internal/prices` | the price cache, price-list parsing, wanted models, run cost |
 | `internal/profile` | built-in scenario profiles and precedence resolution |
 | `internal/link` | launcher resolution and writing |
 | `internal/version` | build metadata |
@@ -43,7 +44,7 @@ command table. No slice edits a shared dispatch switch.
 
 One file, `internal/cli/exitcodes.go`, holds the SDK codes from FR5:
 `2` usage · `3` conversation busy · `4` not found · `5` wait timed out ·
-`6` not resumable · `70` internal · `124` timeout · `125` lost ·
+`6` not resumable · `7` price list unavailable · `70` internal · `124` timeout · `125` lost ·
 `127` provider missing · `130` cancelled by request. Signals map to `128+n`.
 Provider exits pass through unchanged.
 
@@ -79,6 +80,13 @@ type Provider interface {
     BuildPlan(req Request) (Plan, error)
     ParseEvent(line []byte) (Event, bool) // false: unparseable line
     VersionArgs() []string
+}
+
+// Optional, like ModelReporter: a provider that can list the models it
+// offers and names the price-list namespace of their entries.
+type ModelCatalog interface {
+    PriceNamespace() string                         // codex: "openai"
+    CatalogModels(env []string) ([]string, error)  // codex: `codex debug models`, models[].slug
 }
 ```
 
@@ -178,6 +186,32 @@ Lock files: `runs/<run_id>/lock`, `conversations/<conversation_id>.lock`,
 Telemetry records: exactly the FR31 fields for `run`, and
 `{v, kind, run_id, ts, attrs}` for `annotation`, one JSON object per line.
 
+`prices.json` (FR71), written atomically under `prices.lock` by
+`prices refresh`; prices are decimal strings in US dollars per million tokens,
+already resolved (an omitted cache-read or cache-write price is the input
+price):
+
+```json
+{
+  "v": 1,
+  "source": "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+  "etag": "\"…\"",
+  "fetched_at": "RFC3339 UTC",
+  "checked_at": "RFC3339 UTC",
+  "unit": "usd_per_1m_tokens",
+  "models": {
+    "codex": {
+      "gpt-6.1-sol": {"input": "2", "cached_input": "0.1", "cache_write": "2.5", "output": "10"}
+    }
+  },
+  "unpriced": {"codex": ["codex-auto-review", "gpt-reserve"]}
+}
+```
+
+Decimal strings are the shortest exact form: no exponent, no trailing zeros
+after the point, and no point for whole numbers. `prices.lock` uses `flock(2)`
+like the other locks.
+
 ## Test harness
 
 - `test/e2e` builds `agentcli` and `fakecodex` once in `TestMain` into a temp
@@ -197,6 +231,13 @@ Telemetry records: exactly the FR31 fields for `run`, and
   - `FAKECODEX_PIPE_HOLDER=<pidfile>`: start a `setsid` grandchild that keeps
     stdout/stderr open and write its pid to the file.
   - `FAKECODEX_CHILD_IGNORE_TERM=1`: the spawned grandchild ignores SIGTERM.
+  - `FAKECODEX_MODELS`: path of a JSON file printed as-is by `codex debug models`
+    (exit 0). When unset, `debug models` prints an error and exits 1.
+- Every e2e sandbox sets `AGENTCLI_PRICES_URL=off` unless the test sets it to the
+  URL of an `httptest` server on 127.0.0.1 that serves a fixture price list
+  (`testdata/prices/`).
+- `AGENTCLI_TEST_PRICES_TIMEOUT_MS` and `AGENTCLI_TEST_PRICES_MAX_BYTES` shorten
+  the refresh's 20-second timeout and 32 MiB body limit for tests.
 - `AGENTCLI_TEST_SHUTDOWN_GRACE_MS` and `AGENTCLI_TEST_SHUTDOWN_DRAIN_MS`
   shorten the termination grace and the pipe drain for tests. Production
   defaults are 5 seconds each.
@@ -208,7 +249,8 @@ Telemetry records: exactly the FR31 fields for `run`, and
 - `sdk_status` takes one value per SDK outcome, mirroring the exit codes:
   `ok` (the SDK did its part; the provider's own exit may still be non-zero),
   `usage_error`, `busy`, `not_found`, `not_resumable`, `wait_timeout`,
-  `internal_error`, `timeout`, `lost`, `provider_missing`, `cancelled`.
+  `internal_error`, `timeout`, `lost`, `provider_missing`, `cancelled`,
+  `prices_unavailable`.
   `provider_exit` is null when the provider never ran.
 - With `--json`, every exit path prints exactly one JSON object on stdout,
   usage errors included: `{"sdk_status": "...", "exit_code": N, "error": "..."}`
@@ -286,7 +328,8 @@ Telemetry records: exactly the FR31 fields for `run`, and
   Tests exercise the CLI or a package's exported surface, never internals.
 - Run `make test` (or a narrowed `TESTFLAGS`) and paste the output in the report.
 - No git commits, no pushes, no network access other than module downloads, and
-  never invoke a real `codex` binary.
+  never invoke a real `codex` binary. A test server on 127.0.0.1 inside the test
+  process is not network access.
 - Code comments state the behaviour or invariant. They never cite requirement
   or test-case ids (`FR…`); those belong in commit messages.
 - Never stop, kill or remove a container, process or file you did not create.
