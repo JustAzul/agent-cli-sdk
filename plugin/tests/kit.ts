@@ -39,6 +39,17 @@ export function listing(...runs: unknown[]) {
   return ok(JSON.stringify({ runs }))
 }
 
+export const NO_USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+
+// The completions a model can answer with.
+export function answered(text: string) {
+  return { isAnswered: true, text, usage: { ...NO_USAGE, input_tokens: 458, output_tokens: 18 } }
+}
+export function apiError(status: number | null) {
+  return { isAnswered: false, reason: 'api-error', status, error: status === 429 ? 'rate_limit' : 'unknown', usage: NO_USAGE }
+}
+export const emptyReply = () => ({ isAnswered: false, reason: 'empty-reply', usage: { ...NO_USAGE, input_tokens: 458, output_tokens: 2 } })
+
 // world registers every stub a test needs. Call it before the first call on $.
 export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
   const w = {
@@ -68,6 +79,14 @@ export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
     spawns: [] as any[],
     // What a spawn answers; by default the agent starts.
     spawnAnswer: null as null | ((e: any) => any),
+    // The surfaces the session draws on; none by default, so a test is headless
+    // until it opts in with ['terminal'].
+    surfaces: [] as string[],
+    // Every completion that reached the model beneath the plugin, as the
+    // request named it.
+    modelRequests: [] as any[],
+    // What a completion answers; by default a label.
+    respondModel: ((): any => answered('Reading auth.go')) as (request: any) => any,
   }
   on('session.start', () => ({ cwd: '/work' }))
   on('session.id', () => ({ value: w.sessionId }))
@@ -137,6 +156,11 @@ export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
     yield { kind: 'text', index: 0, text: 'a Claude model answered' }
     yield { kind: 'stop', stopReason: 'end_turn', usage: null }
     return { turnId: e.turnId, index: e.index, answer: 'a Claude model answered', toolUses: [], stopReason: 'end_turn', usage: null }
+  })
+  on('session.surfaces', () => ({ value: w.surfaces }))
+  on('model.complete', async (_$: any, e: any) => {
+    w.modelRequests.push(e)
+    return { value: await w.respondModel(e) }
   })
   // Anything the mod does not answer itself falls through to here.
   on('tool.call', () => ({ result: 'unanswered' }))

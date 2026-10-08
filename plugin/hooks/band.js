@@ -56,6 +56,12 @@ export function bandLine(run, now) {
   return parts.filter((part) => part !== '').join(' · ')
 }
 
+// labelled is a run as the band shows it once a summary has settled: its label
+// in place of the newest raw step. Without one the run is as it was.
+export function labelled(run, label) {
+  return typeof label === 'string' ? { ...run, line: label } : run
+}
+
 // withProgress applies what a refresh read to the runs the band follows now:
 // a run the read found ended is dropped, and one with new entries shows the
 // newest. A run without a read (one a poll added meanwhile) is kept as it is,

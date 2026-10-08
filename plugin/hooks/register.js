@@ -61,7 +61,8 @@ import {
   refreshCommand,
   refreshOutcome,
 } from './prices.js'
-import { BAND_REFRESH_MS, bandLine, flaggedRuns, followedRuns, withProgress } from './band.js'
+import { BAND_REFRESH_MS, bandLine, flaggedRuns, followedRuns, labelled, withProgress } from './band.js'
+import { createSummarizer } from './summarizer.js'
 
 const COMMAND = 'agentcli-jobs'
 const NO_TOOLS = 'agentcli agents run no tools: an agentcli job answers for them.'
@@ -121,11 +122,14 @@ const loggedProgressFailures = new Set()
 // The agent ids this load has resolved: the type name for one of this plugin's
 // agent types, null for any other agent. A reload refills it from $.agent.list().
 const knownTypes = new Map()
+// The progress summaries of this load, which the config of the load decides.
+let summaries = createSummarizer({})
 // Conversation records are read, changed and written back; one write at a time
 // keeps two agents admitted together from dropping each other's record.
 let conversationWrites = Promise.resolve()
 
-export function register(on) {
+export function register(on, options) {
+  summaries = createSummarizer(options ?? {})
   on('session.start', async ($, e, next) => {
     await registerTools($)
     await registerAgentTypes($)
@@ -331,7 +335,7 @@ async function checkJobs($) {
   if (reply.exitCode !== 0) return
   const jobs = modJobs(sessionJobs(reply.stdout))
 
-  followed = followedRuns(followed, flaggedRuns(reply.stdout))
+  setFollowed(followedRuns(followed, flaggedRuns(reply.stdout)))
   hasPolledRuns = true
   await refreshBand($)
   await showStatus($, bin, sessionId, runningCount(jobs), terminalRunIds(reply.stdout))
@@ -408,9 +412,14 @@ async function refreshBand($) {
     const read = new Map()
     for (const run of followed) read.set(run.run_id, await newProgress($, bin, run.run_id, run.from))
     // Applied to the list as it is now: a poll may have changed it meanwhile.
-    followed = withProgress(followed, read)
+    setFollowed(withProgress(followed, read))
+    const labels = new Map()
+    for (const run of followed) {
+      if (!(await summaries.observe(summaryPorts($), run.run_id, read.get(run.run_id)?.text ?? []))) continue
+      labels.set(run.run_id, summaries.shown(run.run_id))
+    }
     const now = await $.clock.now()
-    await showBand($, followed.map((run) => ({ run_id: run.run_id, text: bandLine(run, now) })))
+    await showBand($, followed.map((run) => ({ run_id: run.run_id, text: bandLine(labelled(run, labels.get(run.run_id)), now) })))
     isBandFailureLogged = false
   } catch (error) {
     if (!isBandFailureLogged) {
@@ -420,6 +429,15 @@ async function refreshBand($) {
   } finally {
     isRefreshingBand = false
   }
+}
+
+// setFollowed replaces the runs the band follows; a run it lets go of keeps no
+// summaries.
+function setFollowed(next) {
+  for (const run of followed) {
+    if (!next.some((kept) => kept.run_id === run.run_id)) summaries.forget(run.run_id)
+  }
+  followed = next
 }
 
 async function showBand($, rows) {
@@ -536,6 +554,16 @@ async function subagentTypeOf($, agentId) {
   return type
 }
 
+// summaryPorts is what the summaries use of the engine.
+function summaryPorts($) {
+  return {
+    surfaces: () => $.session.surfaces(),
+    now: () => $.clock.now(),
+    complete: (request) => $.model.complete(request),
+    log: (text) => $.ui.log(text, { to: 'debug' }),
+  }
+}
+
 function isKnownSubagent(agentId) {
   return agentId !== undefined && typeof knownTypes.get(agentId) === 'string'
 }
@@ -634,17 +662,20 @@ async function* watchRun($, bin, runId, signal) {
   let reply
   do {
     reply = await $.process.run(sliceWaitCommand(bin, runId), { timeoutMs: SLICE_TIMEOUT_MS })
-    const lines = await newProgress($, bin, runId, from)
-    from = lines.next
-    for (const line of lines.text) yield thinking(line)
+    const progress = await newProgress($, bin, runId, from)
+    from = progress.next
+    // With summaries active the row shows labels, not the entries.
+    const lines = (await summaries.observe(summaryPorts($), runId, progress.text)) ? summaries.take(runId) : progress.text
+    for (const line of lines) yield thinking(line)
 
     const now = await $.clock.now()
-    if (lines.text.length > 0) shownAt = now
+    if (lines.length > 0) shownAt = now
     else if (now - shownAt >= HEARTBEAT_MS) {
       yield thinking(heartbeatLine(now - startedAt))
       shownAt = now
     }
   } while (isWaitTimeout(reply) && !signal.aborted)
+  summaries.forget(runId)
 }
 
 // newProgress reads the run's progress entries from `from` on, and the run's
