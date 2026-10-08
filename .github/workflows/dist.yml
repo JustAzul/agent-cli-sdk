@@ -2,7 +2,8 @@ name: dist
 
 # Publishes the plugin build (static binaries, shim, hooks, manifest) as a
 # single orphan commit on the dist branch, which the marketplace manifest on
-# main points at. Runs are serialized; a newer push cancels an older run.
+# main points at, and creates the GitHub release of a version that has none,
+# tagged on that commit. Runs are serialized; a newer push cancels an older run.
 
 on:
   push:
@@ -34,6 +35,7 @@ jobs:
       - name: PII scan of the dist tree
         run: go run ./tools/piiscan --allowlist testdata/pii-allowlist.txt "$RUNNER_TEMP/dist"
       - name: Publish
+        id: publish
         run: |
           set -eu
           remote=$(git ls-remote origin refs/heads/main | cut -f1)
@@ -49,3 +51,13 @@ jobs:
               -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
               commit --quiet -m "dist: build of $GITHUB_SHA"
           git push --force origin HEAD:refs/heads/dist
+          echo "dist_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Release
+        if: steps.publish.outputs.dist_sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIST_SHA: ${{ steps.publish.outputs.dist_sha }}
+        run: |
+          set -eu
+          git checkout --quiet --detach "$GITHUB_SHA"
+          sh scripts/publish-release.sh "$DIST_SHA" "$GITHUB_SHA"

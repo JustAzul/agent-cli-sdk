@@ -1,7 +1,7 @@
 # Product Requirements Document
 
 **Project / Feature**: agentcli (`agentcli`)
-**Date**: 2026-10-04 (updated 2026-10-08: session cost, group Q; progress summaries and Claude spend, group R)
+**Date**: 2026-10-04 (updated 2026-10-08: session cost, group Q; progress summaries and Claude spend, group R; release tags, FR93)
 
 ---
 
@@ -57,7 +57,7 @@ Cross-model review is a recurring part of the owner's workflow: about 42 dispatc
 
 ### In Scope
 - The `agentcli` binary: CLI surface, provider interface, Codex adapter, conversations, jobs, run artifacts, telemetry, profiles, launcher.
-- Distribution as a Claude Code plugin from a new public repository: marketplace manifest on the default branch, prebuilt plugin on a CI-built `dist` branch.
+- Distribution as a Claude Code plugin from a new public repository: marketplace manifest on the default branch, prebuilt plugin on a CI-built `dist` branch, and a tag and GitHub release for each version.
 - A thin mod: one agent type per scenario that dispatches show as native background agents, native tools for Claude, job-completion notices, a status line with running jobs and the session's costs in US dollars (Codex runs and Claude progress summaries), a `/agentcli-jobs` command, and a band above the prompt that shows the runs other callers flag, with their cost so far and a short label of what each is doing.
 - A local price cache, refreshed from a public price list and holding only the models the providers offer or have run, plus the models of the recorded model calls, from which `stats` and the status line compute cost (groups Q and R).
 - Progress summaries: the mod labels what a run is doing with `claude-haiku-5-5`, shown in the agent row and in the band. Each call is recorded in telemetry as a model call, by a new `usage add` command, and priced and reported per provider by `stats` (group R).
@@ -79,7 +79,7 @@ Cross-model review is a recurring part of the owner's workflow: about 42 dispatc
 - Long-context, Fast, Flex and Batch pricing. Cost uses the standard tier's short-context prices.
 
 ### MVP Definition
-Every P0 row in FR groups A–R. The mod (group K) is part of v1 but is built after the CLI core (groups A–H) is complete and verified. P1 rows (FR10, FR17, FR36) are wanted but do not gate v1. v1 is done when every P0 FR is met, the per-scenario smokes and the post-commit E2E pass, the old wrapper is deleted, and both repositories are pushed.
+Every P0 row in FR groups A–R. The mod (group K) is part of v1 but is built after the CLI core (groups A–H) is complete and verified. P1 rows (FR10, FR17, FR36, FR93) are wanted but do not gate v1. v1 is done when every P0 FR is met, the per-scenario smokes and the post-commit E2E pass, the old wrapper is deleted, and both repositories are pushed.
 
 ---
 
@@ -288,6 +288,7 @@ Acceptance Criteria:
 | FR41 | `bin/agentcli` in the plugin is a POSIX shell shim that maps `uname -s` (`Linux` → linux, `Darwin` → darwin) and `uname -m` (`x86_64`/`amd64` → amd64, `aarch64`/`arm64` → arm64) to one of the four binaries and executes it with all arguments. An unsupported platform prints the supported list and exits 70. | P0 |
 | FR42 | The plugin declares a SessionStart hook that runs `agentcli link --quiet`. | P0 |
 | FR43 | `agentcli link [--quiet]`. **Strategy:** resolve this plugin's authoritative install path from the Claude Code installed-plugins record. Under an exclusive lock, write the launcher (default `~/.local/bin/agentcli`) via temp file plus rename, as a POSIX shell script that executes that install's `bin/agentcli` and records its `build_seq`. It writes only when: the launcher is absent; or the existing launcher is an agentcli launcher with a lower `build_seq`; or it names an install path that no longer exists. It never overwrites a file that is not an agentcli launcher (for example a pipx-installed entry point), and says so unless quiet. `AGENTCLI_NO_LINK=1` makes it a no-op. A missing `~/.local/bin` is created. The install record used is the one for `agentcli@agentcli`, preferring user scope. When no record exists (for example a development build), `link` exits 4 with a message unless `--target <path to an agentcli shim or binary>` is given, in which case that path is used with the running binary's `build_seq`. A launcher whose target no longer exists prints that the agentcli plugin is not installed and exits 127. | P0 |
+| FR93 | Each version has a tag `v<VERSION>` and a GitHub release. `VERSION` holds a Semantic Versioning 2.0.0 version: one that is not fails the release step and creates nothing, and one with a pre-release part (`0.5.0-rc.1`) is published as a GitHub pre-release. **Strategy:** after the dist workflow publishes a build (FR40), it creates the release `v<VERSION>` unless one already exists, with the tag on that build's `dist` commit. The tag keeps the build reachable after later force-pushes of `dist`, and it names a tree with the plugin at its root. An existing release is left unchanged and a tag is never moved, so a version's tag names the first build published for it. The release notes come from git: a line naming the source commit, then the subjects of the commits after the previous version's commit up to the source commit, oldest first, grouped as Features (`feat`), Fixes (`fix`) and Other, without the `chore: release` commits. The previous version's commit is the newest commit that changed `VERSION` and whose `VERSION` differs from the source commit's; when there is none, every commit up to the source commit is listed. | P1 |
 
 #### J. Public-repository privacy
 
@@ -454,6 +455,7 @@ Test external behaviour, not internals.
 | Mods API changes between Claude Code builds | Med | Mod holds no logic; FR49 type check before implementation; CLI fully usable without the mod |
 | Plugin `bin/` not on settings-hook PATH | High | Launcher (FR43) and `AGENTCLI_BIN` override; verified by FR59 |
 | `dist` force-push publishes a stale build | Med | Serialized CI with HEAD check (FR40); `build_seq` prevents launcher downgrade (FR43) |
+| A fix is pushed without a version bump | Med | It ships under the previous version and appears in no release (FR93). `AGENTS.md` makes a version bump a rule for every change to the plugin or the binary |
 | Prompts stored on disk contain sensitive content | Med | User-only permissions; same machine and trust as the provider's own session store; never in telemetry |
 | Process-group semantics differ on macOS | Med | Lifecycle tests on a macOS CI runner |
 | Hook exceeds its 600-second budget | High | FR26 bounded shutdown; FR30 bounded lock wait |

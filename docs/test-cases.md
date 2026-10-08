@@ -70,6 +70,9 @@ Unless stated otherwise:
 - [ ] **namespaced attrs (FR36):** `--attr-json review.findings='{"total":2}'` → stored under the literal key `review.findings`, not nested as `review → findings`.
 - [ ] **marketplace manifest (FR39):** `claude plugin validate` on the repository root passes. The manifest lists one plugin `agentcli` with source `github`, `ref: dist` and no `sha`.
 - [ ] **dist content (FR40, FR42):** the published `dist` tree contains the plugin manifest without `version`, `bin/agentcli`, four binaries, `SHA256SUMS` (all four checksums verify), the skill, the mod, commands, and a hooks file whose SessionStart runs `agentcli link --quiet; agentcli prune --auto`.
+- [ ] **release of a new version (FR93):** a temp repository whose `VERSION` went 0.1.0 → 0.2.0 → 0.3.0, a fake `gh` that has no release `v0.3.0` → `scripts/publish-release.sh <dist sha> <source sha>` runs `gh release create v0.3.0 --target <dist sha> --title v0.3.0 --notes-file <file>`. The notes start with `Build of <source sha>.` and list, oldest first under Features, Fixes and Other, the subjects of the commits after the 0.2.0 commit up to the source commit, each with its short sha, without `chore: release 0.3.0`.
+- [ ] **pre-release version (FR93):** `VERSION` is `0.5.0-rc.1` or `1.0.0-alpha+exp.sha.5114f85` → `gh release create` gets `--prerelease`. `1.0.0+build-1` and `1.2.3` → no `--prerelease`.
+- [ ] **release notes of the first version (FR93):** a temp repository whose `VERSION` was never changed after the first commit → the notes list every commit up to the source commit.
 - [ ] **repository identity (FR45):** `git log --format='%an <%ae>'` on the public repo shows only the owner's global git identity. LICENSE is MIT with the owner's name.
 - [ ] **mods API check (FR49):** before mod code is written, the installed build's mod type definitions are read, and the registration, tool, timer, toast, prompt-submit, status and store calls used by FR46–FR48 exist with the expected shapes. Any mismatch is reported as a blocker.
 - [ ] **dispatch skill (FR50):** the skill text covers scenarios/profiles, tools vs CLI, foreground vs job, continuing conversations, reading results, attribution and open disagreement, no patch application outside delegation, and cost. The carried-over trigger evals pass with the renamed skill.
@@ -431,6 +434,7 @@ Expected costs (US dollars):
 - [ ] **auto prune failure is loud (FR61):** the `runs` directory is read-only so a removal fails → `prune --auto` exits 70 and prints the reason on stderr.
 - [ ] **indexed run directory gone (FR62):** the index lists a run whose directory was deleted → `status --session-id S` skips it without a warning and lists the others.
 - [ ] **CI stale publish (FR40):** the dist workflow run for commit A finishes after commit B landed → the HEAD check fails and `dist` is not updated by A.
+- [ ] **version not semantic (FR93):** `VERSION` is `0.4`, `v0.4.0`, `0.04.0`, `0.4.0-`, `0.4.0-rc..1` or `0.4.0+` → `publish-release.sh` exits 2 saying the version is not a semantic version, and `gh` is never called.
 
 ---
 
@@ -446,6 +450,7 @@ Expected costs (US dollars):
 - [ ] **mod dedup across reload (FR47):** a job finishes, a notice is submitted, then `/reload-plugins` → no second notice for that run id.
 - [ ] **mod notified-set bound (FR47):** 501 finished jobs notified → the persisted set holds exactly the 500 most recent ids.
 - [ ] **dist reproducible (FR40):** `make dist` twice on the same commit → identical binaries (byte-equal) and identical `SHA256SUMS`.
+- [ ] **existing release kept (FR93):** the fake `gh` already has release `v0.3.0` → `publish-release.sh` exits 0, says the release exists, and runs no `gh release create`, so the tag stays on the build it named.
 
 ---
 

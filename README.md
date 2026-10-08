@@ -60,6 +60,11 @@ claude plugin update agentcli@agentcli
 Restart Claude Code to load the new version. The launcher follows it at the
 next session start.
 
+Versions follow [Semantic Versioning](https://semver.org). Each one has a
+[GitHub release](https://github.com/JustAzul/agentcli/releases) whose notes
+list the commits since the previous one. Its tag, `v<version>`,
+names that version's build, which stays there after `dist` moves on.
+
 ### Moving from agent-cli-sdk
 
 The project was called `agent-cli-sdk`, its plugin `agent-cli`. Remove the old
@@ -429,7 +434,9 @@ with a usage error.
 - CI runs the tests on Linux and macOS. On every push to `main`, a separate
   workflow builds the plugin tree, scans it for personal data, and publishes it
   as a single commit on the `dist` branch. The marketplace manifest on `main`
-  points at that branch.
+  points at that branch. When `VERSION` names a version that has no release
+  yet, the workflow also creates the GitHub release `v<version>`, tagged on
+  that build, with notes listing the commits since the previous version.
 - The plugin's mod is plain JavaScript, tested with `claude plugin test plugin`.
 - The requirements and the decisions every change builds against are in
   [`docs/PRD.md`](docs/PRD.md), [`docs/test-cases.md`](docs/test-cases.md) and

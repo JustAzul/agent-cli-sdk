@@ -358,6 +358,10 @@ The last paragraph is left out when there is no previous label.
 - `AGENTCLI_TEST_SHUTDOWN_GRACE_MS` and `AGENTCLI_TEST_SHUTDOWN_DRAIN_MS`
   shorten the termination grace and the pipe drain for tests. Production
   defaults are 5 seconds each.
+- Release tests build a temp git repository with a `VERSION` history and put a
+  fake `gh` first on `PATH`: a shell script the test writes, which logs its
+  arguments, answers `release view` with the exit code the test sets, and keeps
+  a copy of the notes file `release create` is given. No test calls GitHub.
 - Fixtures in `testdata/codex/` are recorded Codex streams with fictitious ids.
   Never put real ids, emails or home paths in the repository.
 
