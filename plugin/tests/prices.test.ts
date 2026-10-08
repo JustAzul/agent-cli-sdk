@@ -21,6 +21,35 @@ test('a cost rounds half up to cents on the decimal string, and a lower bound tr
   expect(costText(stats(null))).toBeUndefined()
 })
 
+const provider = (cost: string | null, complete = true) => ({ cost_usd: cost, cost_complete: complete, runs_with_usage: 1 })
+const byProvider = (usage: Record<string, unknown>) => JSON.stringify({ usage_by_provider: usage })
+
+test('the Codex and Claude costs show side by side, Codex first', () => {
+  expect(costText(byProvider({ anthropic: provider('0.030000'), codex: provider('5.820000') }))).toBe('Codex $5.82 | Claude $0.03')
+})
+
+test('Claude shows alone when Codex has no cost', () => {
+  expect(costText(byProvider({ codex: provider(null), anthropic: provider('0.030000') }))).toBe('Claude $0.03')
+  expect(costText(byProvider({ anthropic: provider('0.030000') }))).toBe('Claude $0.03')
+})
+
+test('Claude is left out until it has a cost', () => {
+  expect(costText(byProvider({ codex: provider('5.820000') }))).toBe('Codex $5.82')
+  expect(costText(byProvider({ codex: provider('5.820000'), anthropic: provider(null) }))).toBe('Codex $5.82')
+  expect(costText(byProvider({ codex: provider(null), anthropic: provider(null) }))).toBeUndefined()
+})
+
+test('each provider cost follows the same rounding and lower-bound rules', () => {
+  expect(costText(byProvider({ codex: provider('0.004000'), anthropic: provider('0.000000') }))).toBe('Codex <$0.01 | Claude $0.00')
+  expect(costText(byProvider({ codex: provider('5.829999', false), anthropic: provider('0.039999', false) }))).toBe('Codex ≥$5.82 | Claude ≥$0.03')
+})
+
+test('an answer without usage_by_provider takes the Codex cost from usage_totals', () => {
+  expect(costText(JSON.stringify({ usage_totals: provider('0.680000') }))).toBe('Codex $0.68')
+  // Present, it decides: usage_totals does not stand in for a missing codex entry.
+  expect(costText(JSON.stringify({ usage_totals: provider('0.680000'), usage_by_provider: { anthropic: provider('0.030000') } }))).toBe('Claude $0.03')
+})
+
 test('a cost too large for a float still rounds exactly', () => {
   expect(formatCost('9007199254740993.995000')).toBe('$9007199254740994.00')
   expect(formatLowerBound('9007199254740993.999999')).toBe('≥$9007199254740993.99')

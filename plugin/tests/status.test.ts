@@ -126,3 +126,25 @@ test('jobs started from the CLI are not counted in the status line', async ($, o
   expect(w.statuses.at(-1)).toContain('1')
   expect(w.statuses.at(-1)).not.toContain('3')
 })
+
+test('the status line joins the jobs and the costs with a dot, and the two costs with a bar', async ($, on) => {
+  const w = world(on)
+  const costs = (codex: string | null, anthropic: string | null) =>
+    JSON.stringify({ usage_by_provider: { codex: { cost_usd: codex, cost_complete: true }, anthropic: { cost_usd: anthropic, cost_complete: true } } })
+  let answer = costs('5.820000', '0.030000')
+  let runs: any[] = [job({ run_id: 'a', state: 'running' }), job({ run_id: 'b', state: 'done', outcome: 'ok' })]
+  w.respond = (argv) => (argv[1] === 'result' ? ok('') : argv[1] === 'stats' ? ok(answer) : listing(...runs))
+  await $.session.start(START)
+
+  await w.clock.advance(POLL_MS)
+  expect(w.statuses.at(-1)).toBe('💸 1 job running · Codex $5.82 | Claude $0.03')
+
+  runs = [job({ run_id: 'a', state: 'done', outcome: 'ok' }), job({ run_id: 'b', state: 'done', outcome: 'ok' })]
+  await w.clock.advance(POLL_MS * 2)
+  expect(w.statuses.at(-1)).toBe('💸 Codex $5.82 | Claude $0.03')
+
+  answer = costs(null, '0.030000')
+  runs = [job({ run_id: 'a', state: 'running' }), job({ run_id: 'b', state: 'done', outcome: 'ok' }), job({ run_id: 'c', state: 'done', outcome: 'ok' })]
+  await w.clock.advance(POLL_MS * 2)
+  expect(w.statuses.at(-1)).toBe('💸 1 job running · Claude $0.03')
+})

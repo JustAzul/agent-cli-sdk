@@ -263,13 +263,21 @@ export function sessionStatsCommand(bin, sessionId) {
   return [bin, 'stats', '--session-id', sessionId, '--all', '--json']
 }
 
-// costText is the session's Codex cost for the status line, or undefined when
-// none of its runs could be priced.
+// providerCost is one provider's cost for the status line, "<label> <amount>",
+// or undefined when it has none.
+function providerCost(label, usage) {
+  const cost = usage?.cost_complete === true ? formatCost(usage.cost_usd) : formatLowerBound(usage?.cost_usd)
+  return cost === undefined ? undefined : label + ' ' + cost
+}
+
+// costText is the session's costs for the status line, the Codex one then the
+// Claude one, or undefined when neither could be priced. An answer without
+// usage_by_provider holds only the Codex runs' usage, in usage_totals.
 export function costText(stdout) {
   try {
-    const totals = JSON.parse(stdout).usage_totals
-    const cost = totals?.cost_complete === true ? formatCost(totals.cost_usd) : formatLowerBound(totals?.cost_usd)
-    return cost === undefined ? undefined : 'Codex ' + cost
+    const stats = JSON.parse(stdout)
+    const providers = stats.usage_by_provider ?? { codex: stats.usage_totals }
+    return [providerCost('Codex', providers.codex), providerCost('Claude', providers.anthropic)].filter((part) => part !== undefined).join(' | ') || undefined
   } catch {
     return undefined
   }

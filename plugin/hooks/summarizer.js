@@ -5,6 +5,7 @@
 import {
   RATE_LIMIT_PAUSE_MS,
   SESSION_IN_FLIGHT_MAX,
+  isBilled,
   isDue,
   isRateLimited,
   labelLine,
@@ -16,8 +17,8 @@ import {
 
 // createSummarizer is one load's summaries; `options` is the plugin's config.
 // What it needs of the engine arrives as `ports`, because a hooks module may
-// not hand `$` to another module: surfaces(), now(), complete(request) and
-// log(text).
+// not hand `$` to another module: surfaces(), now(), complete(request),
+// record(usage, runId) and log(text).
 export function createSummarizer(options) {
   const runs = new Map()
   let inFlight = 0
@@ -57,6 +58,8 @@ export function createSummarizer(options) {
     let outcome
     try {
       const result = await ports.complete(summaryRequest(sent, run.label))
+      // Recorded whether or not the reply is a label, and never waited for.
+      if (isBilled(result)) void ports.record(result.usage, runId).catch(() => {})
       outcome = outcomeOf(result)
       if (isRateLimited(result)) pausedUntil = (await ports.now()) + RATE_LIMIT_PAUSE_MS
     } catch (error) {

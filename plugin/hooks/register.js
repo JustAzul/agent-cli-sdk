@@ -63,6 +63,7 @@ import {
 } from './prices.js'
 import { BAND_REFRESH_MS, bandLine, flaggedRuns, followedRuns, labelled, withProgress } from './band.js'
 import { createSummarizer } from './summarizer.js'
+import { usageAddCommand } from './summary.js'
 
 const COMMAND = 'agentcli-jobs'
 const NO_TOOLS = 'agentcli agents run no tools: an agentcli job answers for them.'
@@ -116,6 +117,12 @@ let isRefreshing = false
 let queuedRefresh = null
 let isRefreshFailureLogged = false
 let isPricesChanged = false
+// The summary calls recorded with `usage add`, and how many of them the session's
+// cost had counted when it was last read. A failed recording is logged once until
+// one succeeds.
+let usageAdds = 0
+let readUsageAdds = 0
+let isRecordFailureLogged = false
 const pricedModels = new Set()
 // Runs whose progress could not be read, each logged once.
 const loggedProgressFailures = new Set()
@@ -355,10 +362,11 @@ async function checkJobs($) {
 
 async function showStatus($, bin, sessionId, running, terminal) {
   const hasRunEnded = terminal !== shownTerminal
-  if (hasRunEnded || isCostRefreshDue || isPricesChanged) {
-    // Taken before the read: a refresh that changes the prices during it is read
-    // by the next poll.
+  if (hasRunEnded || isCostRefreshDue || isPricesChanged || usageAdds !== readUsageAdds) {
+    // Taken before the read: a refresh that changes the prices, or a call that is
+    // recorded, during it is read by the next poll.
     const hadPricesChanged = isPricesChanged
+    const addsBeforeRead = usageAdds
     isPricesChanged = false
     const cost = await sessionCost($, bin, sessionId)
     // A failed read leaves the key, so the next poll reads again.
@@ -367,6 +375,7 @@ async function showStatus($, bin, sessionId, running, terminal) {
     } else {
       isCostRefreshDue = hasRunEnded
       shownTerminal = terminal
+      readUsageAdds = addsBeforeRead
       shownCost = cost
     }
   }
@@ -560,7 +569,30 @@ function summaryPorts($) {
     surfaces: () => $.session.surfaces(),
     now: () => $.clock.now(),
     complete: (request) => $.model.complete(request),
+    record: (usage, runId) => recordUsage($, usage, runId),
     log: (text) => $.ui.log(text, { to: 'debug' }),
+  }
+}
+
+// recordUsage hands a billed summary call to `usage add`. It never throws; a
+// failure is logged once until one recording succeeds.
+async function recordUsage($, usage, runId) {
+  let failure
+  try {
+    const argv = usageAddCommand(shimPath($.plugin.root), await $.session.id(), runId)
+    const reply = await $.process.run(argv, { stdin: JSON.stringify(usage) })
+    if (reply.exitCode === 0) {
+      isRecordFailureLogged = false
+      usageAdds += 1
+      return
+    }
+    failure = failureText(reply)
+  } catch (error) {
+    failure = messageOf(error)
+  }
+  if (!isRecordFailureLogged) {
+    isRecordFailureLogged = true
+    $.ui.log('could not record the usage of a summary call: ' + failure, { to: 'debug' })
   }
 }
 

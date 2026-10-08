@@ -21,6 +21,8 @@ export const SESSION_IN_FLIGHT_MAX = 2
 export const RATE_LIMIT_PAUSE_MS = 60000
 export const LABEL_MARK = '» '
 
+const USAGE_COUNTS = ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens']
+
 export const SYSTEM = [
   'You label what a coding agent is doing right now, for a one-line status row that truncates around 40 characters.',
   'Describe its most recent action in 3-5 words using present tense (-ing). Name the file, command or function, not the branch.',
@@ -84,6 +86,19 @@ export function outcomeOf(result) {
   }
   const status = result && typeof result.status === 'number' ? ' (status ' + result.status + ')' : ''
   return { failure: 'no reply: ' + String(result?.reason ?? 'unknown') + status }
+}
+
+// isBilled tells a completion that used tokens, whether or not it answered:
+// any of the four counts of its usage is above zero.
+export function isBilled(result) {
+  const usage = result?.usage
+  return USAGE_COUNTS.some((count) => typeof usage?.[count] === 'number' && usage[count] > 0)
+}
+
+// usageAddCommand records one billed completion, whose usage goes on standard
+// input.
+export function usageAddCommand(bin, sessionId, runId) {
+  return [bin, 'usage', 'add', '--session-id', sessionId, '--provider', 'anthropic', '--model', SUMMARY_MODEL, '--source', 'mod-summary', '--run-id', runId, '--json']
 }
 
 export function isRateLimited(result) {
