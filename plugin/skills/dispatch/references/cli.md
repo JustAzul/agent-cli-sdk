@@ -73,10 +73,15 @@ provider stderr; read it first when a run errors), `request.json`,
   `cancelled`, 130); on a finished run it changes nothing and exits 0.
 - `agentcli progress <run_id> [--from N] [--json]`: what the provider has done
   so far (commands it started, text it wrote); `--json` returns `next`, to pass
-  back as `--from` to read only what is new.
+  back as `--from` to read only what is new, plus `usage` and `cost_usd`, what
+  the run has used and cost so far (null until the provider reports usage).
 - `agentcli runs [--days N | --all] [--session-id ID]`: folded telemetry, one
   JSON object per run, with `model_used`/`effort_used` (what the provider ran
   with) beside the requested `model`/`effort`.
 - `agentcli stats [--days N | --all] [--session-id ID] [--json]`: totals,
   outcomes, durations, reliability, findings summary, tokens in total and per
-  model (`usage_by_model`).
+  model (`usage_by_model`), and their cost in US dollars at API list prices
+  (`cost_usd`; `cost_complete` is false when some model has no price).
+- `agentcli prices [--json]` / `agentcli prices refresh [--max-age 24h] [--json]`:
+  the cached model prices the cost uses, and refreshing them from the public
+  price list (exit 7 when it cannot be read; the cache is kept).

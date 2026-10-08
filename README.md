@@ -24,6 +24,7 @@ CLI itself.
 - [Conversations and jobs](#conversations-and-jobs)
 - [Scenarios and profiles](#scenarios-and-profiles)
 - [Telemetry](#telemetry)
+- [Cost](#cost)
 - [Inside Claude Code](#inside-claude-code)
 - [Using it from hooks and scripts](#using-it-from-hooks-and-scripts)
 - [Retention](#retention)
@@ -226,6 +227,37 @@ agentcli stats --all --json  # usage_totals, and usage_by_model per model
 agentcli stats --session-id "$CLAUDE_CODE_SESSION_ID"   # one Claude Code session's runs and tokens
 ```
 
+## Cost
+
+`stats` also reports what the runs would cost at the provider's API list
+prices, in US dollars, whatever the sign-in (a subscription included). Prices
+come from the public [LiteLLM price list](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json),
+cached locally for the models your providers offer (`codex debug models`) and
+the ones your runs used, nothing else.
+
+```sh
+agentcli prices refresh --json     # fetch the prices the cache needs (conditional, ETag)
+agentcli prices refresh --max-age 24h   # only when the cache is older than a day
+agentcli prices                    # what is cached, from where and when
+agentcli stats --session-id "$CLAUDE_CODE_SESSION_ID" --all --json | jq .usage_totals.cost_usd
+```
+
+- A run's cost counts its input in three parts: uncached input at the input
+  price, cached input at the cache-read price, and tokens written to the
+  prompt cache at the cache-write price. Reasoning tokens are part of output.
+- Codex reports no cache writes under a ChatGPT sign-in, so when a run reports
+  none, every uncached input token is counted as written, as implicit prompt
+  caching does.
+- Costs are exact (no floating point) and rounded once: 6 decimals in JSON,
+  cents in text.
+- A model the price list does not price (`gpt-reserve`, `codex-auto-review`)
+  makes the total a lower bound: `cost_complete` is false and the status line
+  shows `≥`.
+- Only short-context standard-tier prices are used: no Fast mode, no Batch, no
+  long-context rate.
+- `AGENTCLI_PRICES_URL` points the refresh at another copy of the list;
+  `AGENTCLI_PRICES_URL=off` stops it from going to the network at all.
+
 ## Inside Claude Code
 
 The plugin adds a `dispatch` skill and a mod.
@@ -268,13 +300,16 @@ hands Claude a notice with the outcome and the output (inline up to 8 KiB).
 
 A run any other caller starts with `--agent-feedback` (see below), such as a
 hook's review, shows in a band above the prompt while it works: one line with
-its scenario, its source, how long it has run and the latest thing it did,
-gone once it ends. Only you see the band: nothing about the run reaches
-Claude, and the caller that started it delivers its result.
+its scenario, its source, how long it has run, what it has cost so far and the
+latest thing it did, gone once it ends. Only you see the band: nothing about
+the run reaches Claude, and the caller that started it delivers its result.
 
-The status line counts the session's running jobs and its Codex token use
-(`Codex 1.4M in · 7.2k out`). `/agentcli-jobs` lists the session's jobs at
-once, even while Claude is working.
+The status line counts the session's running jobs and shows what the
+session's runs cost, hook runs included (`1 job running · Codex $0.68`; `≥`
+when part of it has no price). The mod refreshes the price cache when the
+session starts (at most once a day) and whenever the conversation is
+compacted. `/agentcli-jobs` lists the session's jobs at once, even while Claude
+is working.
 
 ## Using it from hooks and scripts
 
@@ -332,6 +367,7 @@ agentcli prune --older-than 14      # remove finished runs that ended over 14 da
 | 4 | run or conversation not found |
 | 5 | `wait` reached its own `--timeout` (the run keeps going) |
 | 6 | conversation not resumable yet |
+| 7 | `prices refresh` could not get the price list (the cache is kept) |
 | 70 | internal error, or a job whose worker never started |
 | 124 | the run hit `--timeout` |
 | 125 | the run was lost (its worker died) |
