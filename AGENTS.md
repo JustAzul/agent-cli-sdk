@@ -16,9 +16,15 @@ push, as Semantic Versioning defines it, with the public API being the
 documented contract (commands, flags, exit codes, JSON outputs, persisted
 formats, the mod's tools):
 
-- an incompatible change to that contract bumps the major: `0.4.1` → `1.0.0`;
+- an incompatible change to that contract bumps the major (`1.4.2` → `2.0.0`),
+  or the minor while the major is `0` (`0.4.1` → `0.5.0`), since Semantic
+  Versioning lets a `0.y.z` version change anything at any time;
 - a new feature that keeps it compatible bumps the minor: `0.4.1` → `0.5.0`;
 - a compatible fix bumps the patch: `0.4.0` → `0.4.1`.
+
+`1.0.0` declares the contract stable, so it is released only when the
+repository owner asks for it, never as the next bump after an incompatible
+change.
 
 A version with a pre-release part, such as `0.5.0-rc.1`, is published as a
 GitHub pre-release.
