@@ -207,6 +207,11 @@ A record carries:
 - output path and size, error excerpt, token usage;
 - an `attrs` object for anything else.
 
+A model call made outside a run, such as one of the mod's progress summaries,
+appends a `model_call` record instead: provider, model, source, session id,
+the run it was about and its token usage. `agentcli usage add` writes it;
+runs and their counts never include it.
+
 Attributes are how consumers add data without a schema change:
 
 ```sh
@@ -240,14 +245,19 @@ agentcli prices refresh --json     # fetch the prices the cache needs (condition
 agentcli prices refresh --max-age 24h   # only when the cache is older than a day
 agentcli prices                    # what is cached, from where and when
 agentcli stats --session-id "$CLAUDE_CODE_SESSION_ID" --all --json | jq .usage_totals.cost_usd
+agentcli stats --session-id "$CLAUDE_CODE_SESSION_ID" --all --json | jq .usage_by_provider
 ```
 
 - A run's cost counts its input in three parts: uncached input at the input
   price, cached input at the cache-read price, and tokens written to the
   prompt cache at the cache-write price. Reasoning tokens are part of output.
-- Codex reports no cache writes under a ChatGPT sign-in, so when a run reports
-  none, every uncached input token is counted as written, as implicit prompt
-  caching does.
+- Codex reports no cache writes under a ChatGPT sign-in, so when a Codex run
+  reports none, every uncached input token is counted as written, as implicit
+  prompt caching does. Anthropic reports the writes it made, so a model call
+  is priced exactly as reported.
+- `usage_totals` is what the runs cost. `usage_by_provider` splits it per
+  provider and adds the model calls (`anthropic`), each with its own
+  `cost_usd`.
 - Costs are exact (no floating point) and rounded once: 6 decimals in JSON,
   cents in text.
 - A model the price list does not price (`gpt-reserve`, `codex-auto-review`)
@@ -273,8 +283,9 @@ The **mod** registers one agent type per scenario, `agentcli:second-opinion`,
 `:code-review`, `:cross-check`, `:expert-persona`, `:delegation` and `:adhoc`.
 Claude dispatches through the Agent tool, and the run behaves like any
 background agent:
-- its row streams what the provider is doing (commands it starts, text it
-  writes, an elapsed-time line when it is quiet);
+- its row shows what the run is doing as a short summary every few steps
+  (`» Reading workerlog.go`), with an elapsed-time line when it is quiet; with
+  summaries off, the raw steps (commands it starts, text it writes);
 - the native completion notification carries the output;
 - a SendMessage to the agent sends the next turn of the same conversation;
 - stopping the agent cancels its run.
@@ -300,13 +311,22 @@ hands Claude a notice with the outcome and the output (inline up to 8 KiB).
 
 A run any other caller starts with `--agent-feedback` (see below), such as a
 hook's review, shows in a band above the prompt while it works: one line with
-its scenario, its source, how long it has run, what it has cost so far and the
-latest thing it did, gone once it ends. Only you see the band: nothing about
-the run reaches Claude, and the caller that started it delivers its result.
+its scenario, its source, how long it has run, what it has cost so far and a
+short summary of what it is doing, gone once it ends. Only you see the band:
+nothing about the run enters the conversation, and the caller that started it
+delivers its result.
+
+The summaries come from `claude-haiku-5-5` at low effort: the mod sends a
+run's newest steps, each cut to 300 characters, to the Anthropic API through
+the session's own sign-in, on the run's first step and then every three. They
+are skipped when nothing is on screen (`claude -p`), and the plugin's
+`summaries` option turns them off, back to the raw steps. A summary that fails
+shows the raw step instead.
 
 The status line counts the session's running jobs and shows what the
-session's runs cost, hook runs included (`💸 1 job running · Codex $0.68`; `≥`
-when part of it has no price). The mod refreshes the price cache when the
+session's runs cost, hook runs included, and what the mod's own model calls
+cost (`💸 1 job running · Codex $0.68 | Claude $0.01`; `≥` when part of it has
+no price). Both are estimates at API list prices. The mod refreshes the price cache when the
 session starts (at most once a day) and whenever the conversation is
 compacted. `/agentcli-jobs` lists the session's jobs at once, even while Claude
 is working.
@@ -389,6 +409,9 @@ with a usage error.
   `--`.
 - Prompts go to the provider on stdin and are stored only in the run directory
   (mode 0600, directories 0700). Telemetry never holds the prompt.
+- With summaries on, the mod sends a run's newest steps, cut short, to the
+  Anthropic API (see [Inside Claude Code](#inside-claude-code)); the
+  `summaries` option turns that off.
 
 ## How it is built
 
