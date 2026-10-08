@@ -1,0 +1,11 @@
+{
+  "name": "agentcli",
+  "description": "agentcli: one command-line interface for driving agent CLIs (Codex today) from Claude Code, hooks and scripts, with resumable conversations, background jobs and append-only telemetry.",
+  "author": {
+    "name": "Diego (Azul) Ferreira"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/JustAzul/agentcli",
+  "repository": "https://github.com/JustAzul/agentcli",
+  "types": "./types/index.d.ts"
+}
