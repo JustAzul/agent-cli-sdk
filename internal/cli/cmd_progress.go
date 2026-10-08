@@ -6,6 +6,7 @@ import (
 	"io"
 	"strconv"
 
+	"github.com/JustAzul/agentcli/internal/provider"
 	"github.com/JustAzul/agentcli/internal/store"
 )
 
@@ -20,6 +21,10 @@ type progressResult struct {
 	State   string                `json:"state"`
 	Next    int                   `json:"next"`
 	Entries []store.ProgressEntry `json:"entries"`
+	// Usage and CostUSD are what the run has used so far and what that costs
+	// at the cached prices; null while the provider cannot say.
+	Usage   *provider.Usage `json:"usage"`
+	CostUSD *string         `json:"cost_usd"`
 }
 
 func runProgress(ctx *Context, args []string) int {
@@ -54,7 +59,12 @@ func runProgress(ctx *Context, args []string) int {
 	}
 
 	if asJSON {
-		if printJSON(ctx, progressResult{RunID: state.RunID, State: state.State, Next: nextSeq(entries, from), Entries: entries}) != 0 {
+		live := liveReadingOf(ctx, st, state)
+		result := progressResult{
+			RunID: state.RunID, State: state.State, Next: nextSeq(entries, from), Entries: entries,
+			Usage: live.Usage, CostUSD: live.CostUSD,
+		}
+		if printJSON(ctx, result) != 0 {
 			return ExitInternal
 		}
 		return ExitOK

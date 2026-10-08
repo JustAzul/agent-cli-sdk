@@ -18,18 +18,28 @@ import (
 // the current turn's on a resumed session. It depends on that file layout: no
 // such file yields "" for both, and one that cannot be read an error.
 func (adapter) UsedModel(env []string, sessionID string) (model, effort string, err error) {
+	path, err := sessionFile(env, sessionID)
+	if err != nil || path == "" {
+		return "", "", err
+	}
+	return lastTurnContext(path)
+}
+
+// sessionFile is the path of the session's file under the run's codex home,
+// or "" when the id is empty or holds glob syntax, or no such file exists.
+func sessionFile(env []string, sessionID string) (string, error) {
 	if sessionID == "" || strings.ContainsAny(sessionID, `*?[]\/`) {
-		return "", "", nil
+		return "", nil
 	}
 	home := codexHome(env)
 	if home == "" {
-		return "", "", nil
+		return "", nil
 	}
 	matches, err := filepath.Glob(filepath.Join(home, "sessions", "*", "*", "*", "rollout-*-"+sessionID+".jsonl"))
 	if err != nil || len(matches) == 0 {
-		return "", "", err
+		return "", err
 	}
-	return lastTurnContext(matches[len(matches)-1])
+	return matches[len(matches)-1], nil
 }
 
 // codexHome is where codex keeps its state for the run's environment.

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 )
 
 // Capabilities declares what a provider supports.
@@ -128,6 +129,13 @@ type Progress struct {
 // record to read; an error means one could not be read.
 type ModelReporter interface {
 	UsedModel(env []string, sessionID string) (model, effort string, err error)
+}
+
+// LiveUsageReporter is a provider that can tell what a run has used so far,
+// from its own session records: the usage since the run started and the model
+// in use. ok is false when there is nothing to report yet.
+type LiveUsageReporter interface {
+	LiveUsage(env []string, sessionID string, since time.Time) (u Usage, model string, ok bool, err error)
 }
 
 // ModelCatalog is a provider that can list the models it offers and names the
