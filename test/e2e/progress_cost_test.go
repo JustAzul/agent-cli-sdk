@@ -364,3 +364,50 @@ func TestProgressWarnsWhenTheConversationCannotBeRead(t *testing.T) {
 		t.Errorf("stderr = %q, want one warning naming the run", stderr)
 	}
 }
+
+func TestProgressWarnsWhenTheRunStartCannotBeRead(t *testing.T) {
+	s := newSandbox(t)
+	costCache(t, s)
+	start, home := liveRun(t, s, "bs1")
+	stateFile := filepath.Join(s.home, "runs", "bs1", "state.json")
+	state := readJSONFile(t, stateFile)
+	state["started_at"] = "not a time"
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stateFile, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeSession(t, home, sessionTurnContext(start.Add(time.Second), "m-sol"),
+		sessionTokenCount(start.Add(2*time.Second), tokens{1000000, 800000, 0, 10000, 2000}))
+
+	got, stderr := progressWithStderr(t, s, "bs1")
+
+	wantUsage(t, got, nil, nil)
+	if lines := strings.Split(strings.TrimSpace(stderr), "\n"); len(lines) != 1 ||
+		!strings.HasPrefix(lines[0], "agentcli: warning: reading the start of run bs1: ") {
+		t.Errorf("stderr = %q, want one warning naming the run", stderr)
+	}
+}
+
+func TestProgressWarnsWhenTheRequestCannotBeRead(t *testing.T) {
+	s := newSandbox(t)
+	costCache(t, s)
+	start, home := liveRun(t, s, "br1", "--model", "m-sol")
+	if err := os.WriteFile(filepath.Join(s.home, "runs", "br1", "request.json"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// No turn_context: the model would come from the request.
+	writeSession(t, home, sessionTokenCount(start.Add(2*time.Second), tokens{1000000, 800000, 0, 10000, 2000}))
+
+	got, stderr := progressWithStderr(t, s, "br1")
+
+	if got["usage"] == nil || got["cost_usd"] != nil {
+		t.Errorf("usage = %v, cost_usd = %v; want usage and no cost", got["usage"], got["cost_usd"])
+	}
+	if lines := strings.Split(strings.TrimSpace(stderr), "\n"); len(lines) != 1 ||
+		!strings.HasPrefix(lines[0], "agentcli: warning: reading the request of run br1: ") {
+		t.Errorf("stderr = %q, want one warning naming the run", stderr)
+	}
+}

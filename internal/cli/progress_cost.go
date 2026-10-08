@@ -22,15 +22,16 @@ type liveReading struct {
 // boundary, so they would include whatever the conversation did afterwards.
 // Anything else that keeps the answer from being known (a run not yet started,
 // a conversation with no provider session, a provider without the capability,
-// nothing in the session yet) yields an empty reading silently; a conversation
-// record or a session file that cannot be read yields one too, with a warning. Following a run never
-// fails because its usage is unknown.
+// nothing in the session yet) yields an empty reading silently; a start time,
+// conversation record, request or session file that cannot be read yields one
+// too, with a warning. Following a run never fails because its usage is unknown.
 func liveReadingOf(ctx *Context, st *store.Store, state store.State) liveReading {
 	if store.IsTerminal(state.State) || state.StartedAt == nil {
 		return liveReading{}
 	}
 	started, err := time.Parse(time.RFC3339Nano, *state.StartedAt)
 	if err != nil {
+		ctx.Warnf("reading the start of run %s: %v", state.RunID, err)
 		return liveReading{}
 	}
 	// started_at is kept to the second, so the previous turn of a resumed
@@ -64,15 +65,22 @@ func liveReadingOf(ctx *Context, st *store.Store, state store.State) liveReading
 		return liveReading{}
 	}
 	if model == "" {
-		model = requestedModel(st, state.RunID)
+		model = requestedModel(ctx, st, state.RunID)
 	}
 	return liveReading{Usage: &usage, CostUSD: liveCost(ctx, st, pricedUsage{provider: conv.Provider, model: model, usage: usage})}
 }
 
-// requestedModel is the model the run was asked for, or "".
-func requestedModel(st *store.Store, runID string) string {
+// requestedModel is the model the run was asked for, or "". A request that
+// exists but cannot be read is warned about.
+func requestedModel(ctx *Context, st *store.Store, runID string) string {
 	var req requestRecord
-	if st.ReadRequest(runID, &req) != nil || req.Model == nil {
+	if err := st.ReadRequest(runID, &req); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			ctx.Warnf("reading the request of run %s: %v", runID, err)
+		}
+		return ""
+	}
+	if req.Model == nil {
 		return ""
 	}
 	return *req.Model
