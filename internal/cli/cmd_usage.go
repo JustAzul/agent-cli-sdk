@@ -35,19 +35,64 @@ func runUsage(ctx *Context, args []string) int {
 	return ctx.Fail(ExitUsage, "usage needs a subcommand: add")
 }
 
-func runUsageAdd(ctx *Context, args []string) int {
-	var sessionID, providerName, model, source, runID string
-	var asJSON bool
+// usageAddFlags is what `usage add` was asked to record.
+type usageAddFlags struct {
+	sessionID, provider, model, source, runID string
+	runIDGiven, asJSON                        bool
+}
+
+// parseUsageAddFlags reads the flags of `usage add` and the arguments left
+// after them.
+func parseUsageAddFlags(args []string) (usageAddFlags, []string, error) {
+	var f usageAddFlags
 	fset := flag.NewFlagSet("usage add", flag.ContinueOnError)
 	fset.SetOutput(io.Discard)
-	fset.StringVar(&sessionID, "session-id", "", "the Claude Code session id")
-	fset.StringVar(&providerName, "provider", "", "the model provider")
-	fset.StringVar(&model, "model", "", "the model called")
-	fset.StringVar(&source, "source", "", "what made the call")
-	fset.StringVar(&runID, "run-id", "", "the run the call was about")
-	fset.BoolVar(&asJSON, "json", false, "print one JSON object")
-	ctx.JSON = wantsJSON(args)
+	fset.StringVar(&f.sessionID, "session-id", "", "the Claude Code session id")
+	fset.StringVar(&f.provider, "provider", "", "the model provider")
+	fset.StringVar(&f.model, "model", "", "the model called")
+	fset.StringVar(&f.source, "source", "", "what made the call")
+	fset.StringVar(&f.runID, "run-id", "", "the run the call was about")
+	fset.BoolVar(&f.asJSON, "json", false, "print one JSON object")
 	positional, err := parseInterspersed(fset, args)
+	fset.Visit(func(given *flag.Flag) { f.runIDGiven = f.runIDGiven || given.Name == "run-id" })
+	return f, positional, err
+}
+
+// problem names the first thing `usage add` cannot take, or "" when there is
+// none.
+func (f usageAddFlags) problem(positional []string) string {
+	switch {
+	case len(positional) != 0:
+		return fmt.Sprintf("usage add takes no arguments, got %q", positional[0])
+	case f.sessionID == "":
+		return "usage add needs a non-empty --session-id"
+	case f.model == "":
+		return "usage add needs a non-empty --model"
+	case f.source == "":
+		return "usage add needs a non-empty --source"
+	}
+	if _, ok := modelCallProviders[f.provider]; !ok {
+		return fmt.Sprintf("--provider must be anthropic, got %q", f.provider)
+	}
+	return ""
+}
+
+// modelCall is the record of one call with usage, recorded at now. An absent
+// --run-id records null.
+func (f usageAddFlags) modelCall(usage provider.Usage, now time.Time) telemetry.ModelCall {
+	call := telemetry.ModelCall{
+		CallID: store.NewCallID(now), TS: now.Format(time.RFC3339), SessionID: f.sessionID,
+		Provider: f.provider, Model: f.model, Source: f.source, Usage: usage,
+	}
+	if f.runIDGiven {
+		call.RunID = &f.runID
+	}
+	return call
+}
+
+func runUsageAdd(ctx *Context, args []string) int {
+	ctx.JSON = wantsJSON(args)
+	f, positional, err := parseUsageAddFlags(args)
 	if errors.Is(err, flag.ErrHelp) {
 		fmt.Fprintln(ctx.Stderr, usageAddLine)
 		return ExitOK
@@ -55,21 +100,9 @@ func runUsageAdd(ctx *Context, args []string) int {
 	if err != nil {
 		return ctx.Fail(ExitUsage, "%v", err)
 	}
-	ctx.JSON = asJSON
-	runIDGiven := false
-	fset.Visit(func(f *flag.Flag) { runIDGiven = runIDGiven || f.Name == "run-id" })
-	switch {
-	case len(positional) != 0:
-		return ctx.Fail(ExitUsage, "usage add takes no arguments, got %q", positional[0])
-	case sessionID == "":
-		return ctx.Fail(ExitUsage, "usage add needs a non-empty --session-id")
-	case model == "":
-		return ctx.Fail(ExitUsage, "usage add needs a non-empty --model")
-	case source == "":
-		return ctx.Fail(ExitUsage, "usage add needs a non-empty --source")
-	}
-	if _, ok := modelCallProviders[providerName]; !ok {
-		return ctx.Fail(ExitUsage, "--provider must be anthropic, got %q", providerName)
+	ctx.JSON = f.asJSON
+	if problem := f.problem(positional); problem != "" {
+		return ctx.Fail(ExitUsage, "%s", problem)
 	}
 
 	raw, err := io.ReadAll(ctx.Stdin)
@@ -80,8 +113,12 @@ func runUsageAdd(ctx *Context, args []string) int {
 	if err != nil {
 		return ctx.Fail(ExitUsage, "stdin: %v", err)
 	}
+	report := printUsageAddText
+	if f.asJSON {
+		report = printUsageAddJSON
+	}
 	if usage.IsZero() {
-		return printUsageAdd(ctx, asJSON, "")
+		return report(ctx, "")
 	}
 
 	home, err := store.ResolveHome(ctx.Getenv)
@@ -89,38 +126,35 @@ func runUsageAdd(ctx *Context, args []string) int {
 		return ctx.Fail(ExitInternal, "%v", err)
 	}
 	now := ctx.Now().UTC().Truncate(time.Second)
-	call := telemetry.ModelCall{
-		CallID: store.NewCallID(now), TS: now.Format(time.RFC3339), SessionID: sessionID,
-		Provider: providerName, Model: model, Source: source, Usage: usage,
-	}
-	if runIDGiven {
-		call.RunID = &runID
-	}
+	call := f.modelCall(usage, now)
 	if err := telemetry.AppendModelCall(home, call, now, telemetry.Options{}); err != nil {
 		return ctx.Fail(ExitInternal, "writing the model call: %v", err)
 	}
-	return printUsageAdd(ctx, asJSON, call.CallID)
+	return report(ctx, call.CallID)
 }
 
-// printUsageAdd reports the outcome; an empty callID means nothing was recorded.
-func printUsageAdd(ctx *Context, asJSON bool, callID string) int {
-	if asJSON {
-		var id any
-		if callID != "" {
-			id = callID
-		}
-		out, err := json.Marshal(struct {
-			SDKStatus string `json:"sdk_status"`
-			ExitCode  int    `json:"exit_code"`
-			Recorded  bool   `json:"recorded"`
-			CallID    any    `json:"call_id"`
-		}{"ok", ExitOK, callID != "", id})
-		if err != nil {
-			return ctx.Fail(ExitInternal, "%v", err)
-		}
-		fmt.Fprintf(ctx.Stdout, "%s\n", out)
-		return ExitOK
+// printUsageAddJSON reports the outcome as one JSON object; an empty callID
+// means nothing was recorded.
+func printUsageAddJSON(ctx *Context, callID string) int {
+	var id any
+	if callID != "" {
+		id = callID
 	}
+	out, err := json.Marshal(struct {
+		SDKStatus string `json:"sdk_status"`
+		ExitCode  int    `json:"exit_code"`
+		Recorded  bool   `json:"recorded"`
+		CallID    any    `json:"call_id"`
+	}{"ok", ExitOK, callID != "", id})
+	if err != nil {
+		return ctx.Fail(ExitInternal, "%v", err)
+	}
+	fmt.Fprintf(ctx.Stdout, "%s\n", out)
+	return ExitOK
+}
+
+// printUsageAddText prints the call id, or nothing when nothing was recorded.
+func printUsageAddText(ctx *Context, callID string) int {
 	if callID != "" {
 		fmt.Fprintln(ctx.Stdout, callID)
 	}
