@@ -32,7 +32,7 @@ func runStats(ctx *Context, args []string) int {
 	if err != nil {
 		return ctx.Fail(ExitInternal, "%v", err)
 	}
-	stats := telemetry.ComputeStats(folded.Runs, folded.Skipped, days, readPriceCache(ctx, store.Open(home)))
+	stats := telemetry.ComputeStatsWithModelCalls(folded.Runs, folded.ModelCalls, folded.Skipped, days, readPriceCache(ctx, store.Open(home)))
 	if asJSON {
 		data, err := json.MarshalIndent(stats, "", "  ")
 		if err != nil {

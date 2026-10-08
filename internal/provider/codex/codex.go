@@ -21,6 +21,10 @@ func New() provider.Provider { return adapter{} }
 
 func (adapter) Name() string { return "codex" }
 
+// ImplicitCacheWrites is true: Codex caches prompts on its own and reports no
+// cache writes.
+func (adapter) ImplicitCacheWrites() bool { return true }
+
 func (adapter) Capabilities() provider.Capabilities {
 	return provider.Capabilities{
 		Commands:      []string{"exec", "review", "resume"},

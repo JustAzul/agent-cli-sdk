@@ -21,8 +21,10 @@ func init() {
 
 const usageAddLine = "usage: agentcli usage add --session-id <id> --provider anthropic --model <model> --source <source> [--run-id <run_id>] [--json]"
 
-// modelCallProviders are the providers a model call can be recorded for.
-var modelCallProviders = map[string]bool{"anthropic": true}
+// modelCallProviders maps each provider a model call can be recorded for to
+// the price-list namespace (litellm_provider) its models are priced under.
+// These providers have no model catalog.
+var modelCallProviders = map[string]string{"anthropic": "anthropic"}
 
 func runUsage(ctx *Context, args []string) int {
 	if len(args) > 0 && args[0] == "add" {
@@ -65,7 +67,8 @@ func runUsageAdd(ctx *Context, args []string) int {
 		return ctx.Fail(ExitUsage, "usage add needs a non-empty --model")
 	case source == "":
 		return ctx.Fail(ExitUsage, "usage add needs a non-empty --source")
-	case !modelCallProviders[providerName]:
+	}
+	if _, ok := modelCallProviders[providerName]; !ok {
 		return ctx.Fail(ExitUsage, "--provider must be anthropic, got %q", providerName)
 	}
 

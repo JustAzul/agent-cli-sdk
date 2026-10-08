@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/JustAzul/agentcli/internal/prices"
+	"github.com/JustAzul/agentcli/internal/provider"
 )
 
 // cleanOutputMaxBytes is the output size at or below which a successful hook
@@ -204,6 +205,18 @@ func asInt(v any) (int64, bool) {
 // cost totals, skipped and the price gaps added. cache is the price cache, nil
 // when there is no usable one: then no run is priced.
 func ComputeStats(runs []map[string]any, skipped Skipped, windowDays *int, cache *prices.Cache) *Obj {
+	return ComputeStatsWithModelCalls(runs, nil, skipped, windowDays, cache)
+}
+
+// ComputeStatsWithModelCalls is ComputeStats with the model calls of the same
+// window. Model calls feed the usage and cost per model and per provider and
+// the price gaps; the run counts, the usage totals and everything else about
+// runs ignore them.
+func ComputeStatsWithModelCalls(runs, modelCalls []map[string]any, skipped Skipped, windowDays *int, cache *prices.Cache) *Obj {
+	calls := make([]entry, len(modelCalls))
+	for i, c := range modelCalls {
+		calls[i] = newEntry(c)
+	}
 	entries := make([]entry, len(runs))
 	providers := newCounter()
 	for i, r := range runs {
@@ -262,11 +275,14 @@ func ComputeStats(runs []map[string]any, skipped Skipped, windowDays *int, cache
 		out.Set("window_days", int64(*windowDays))
 	}
 	out.Set("by_provider", providers.obj(true))
-	unpriced, missing := priceGaps(entries, cache)
+	runUnpriced, _ := priceGaps(entries, cache)
 	totals := usageTotals(entries, cache)
-	totals.Set("cost_complete", len(unpriced) == 0)
+	totals.Set("cost_complete", len(runUnpriced) == 0)
 	out.Set("usage_totals", totals)
-	out.Set("usage_by_model", usageByModel(entries, cache))
+	everything := append(append([]entry(nil), entries...), calls...)
+	unpriced, missing := priceGaps(everything, cache)
+	out.Set("usage_by_model", usageByModel(everything, cache))
+	out.Set("usage_by_provider", usageByProvider(everything, cache))
 	out.Set("skipped", skipped)
 	out.Set("unpriced_models", unpriced)
 	out.Set("missing_prices", missing)
@@ -439,6 +455,30 @@ func usageByModel(entries []entry, cache *prices.Cache) *Obj {
 	return out
 }
 
+// usageByProvider is usageTotals, with cost_complete, for each provider that has
+// a record with usage, the providers in name order.
+func usageByProvider(entries []entry, cache *prices.Cache) *Obj {
+	byProvider := map[string][]entry{}
+	for _, e := range entries {
+		if e.hasUsage {
+			byProvider[e.provider] = append(byProvider[e.provider], e)
+		}
+	}
+	names := make([]string, 0, len(byProvider))
+	for name := range byProvider {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := &Obj{}
+	for _, name := range names {
+		totals := usageTotals(byProvider[name], cache)
+		unpriced, _ := priceGaps(byProvider[name], cache)
+		totals.Set("cost_complete", len(unpriced) == 0)
+		out.Set(name, totals)
+	}
+	return out
+}
+
 // Cost is a sum of run costs in US dollars, kept exact. It encodes as a
 // decimal string with six places, rounded once.
 type Cost struct{ usd *big.Rat }
@@ -467,6 +507,7 @@ func runCost(e entry, cache *prices.Cache) (cost *big.Rat, ok bool) {
 	return prices.RunCost(prices.Usage{
 		Input: count("input_tokens"), Cached: count("cached_input_tokens"),
 		CacheWrite: count("cache_write_input_tokens"), Output: count("output_tokens"),
+		ImplicitCacheWrites: provider.HasImplicitCacheWrites(e.provider),
 	}, price), true
 }
 

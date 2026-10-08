@@ -109,6 +109,7 @@ func liveCost(ctx *Context, st *store.Store, p pricedUsage) *string {
 	cost := prices.FormatUSD(prices.RunCost(prices.Usage{
 		Input: p.usage.InputTokens, Cached: p.usage.CachedInputTokens,
 		CacheWrite: p.usage.CacheWriteInputTokens, Output: p.usage.OutputTokens,
+		ImplicitCacheWrites: provider.HasImplicitCacheWrites(p.provider),
 	}, price))
 	return &cost
 }

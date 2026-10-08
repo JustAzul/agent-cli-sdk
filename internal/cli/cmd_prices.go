@@ -344,8 +344,10 @@ func readPriceCache(ctx *Context, st *store.Store) *prices.Cache {
 
 // wantedModels is what a refresh prices, per provider: the models of each
 // provider that declares a catalog plus every model its runs used anywhere in
-// the telemetry, and the telemetry models of the providers without one.
-// namespaces maps each provider with a catalog to its price-list namespace.
+// the telemetry, and the telemetry models of the providers without one. The
+// models of the model calls in the telemetry are wanted too, under their
+// provider. namespaces maps each provider with a catalog, and each model-call
+// provider, to its price-list namespace.
 // An unreadable catalog leaves the telemetry models and is reported in
 // catalogErr.
 func wantedModels(ctx *Context, home string) (wanted map[string][]string, namespaces map[string]string, catalogErr string, err error) {
@@ -360,6 +362,16 @@ func wantedModels(ctx *Context, home string) (wanted map[string][]string, namesp
 		if name != "" && model != "" && model != "unknown" {
 			wanted[name] = append(wanted[name], model)
 		}
+	}
+	for _, call := range folded.ModelCalls {
+		name, _ := call["provider"].(string)
+		model, _ := call["model"].(string)
+		if name != "" && model != "" && model != "unknown" {
+			wanted[name] = append(wanted[name], model)
+		}
+	}
+	for name, namespace := range modelCallProviders {
+		namespaces[name] = namespace
 	}
 	var failures []string
 	for _, name := range provider.Names() {

@@ -245,3 +245,15 @@ func TestReviewUsageZeroBecomesNull(t *testing.T) {
 		t.Errorf("nil stays nil, got %+v", got)
 	}
 }
+
+func TestCodexCachesPromptsImplicitly(t *testing.T) {
+	caching, ok := codex.New().(provider.ImplicitCaching)
+	if !ok || !caching.ImplicitCacheWrites() {
+		t.Fatalf("codex ImplicitCaching = %v (implemented %v), want true", caching, ok)
+	}
+	for name, want := range map[string]bool{"codex": true, "anthropic": false, "": false} {
+		if got := provider.HasImplicitCacheWrites(name); got != want {
+			t.Errorf("HasImplicitCacheWrites(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

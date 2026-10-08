@@ -8,19 +8,25 @@ import "math/big"
 type Price struct{ Input, CachedInput, CacheWrite, Output *big.Rat }
 
 // Usage is the token counts of one run. A negative count is read as 0.
-type Usage struct{ Input, Cached, CacheWrite, Output int64 }
+type Usage struct {
+	Input, Cached, CacheWrite, Output int64
+	// ImplicitCacheWrites says the provider caches prompts implicitly and does
+	// not report what it wrote.
+	ImplicitCacheWrites bool
+}
 
 var million = big.NewRat(1000000, 1)
 
 // RunCost is the cost in US dollars of u at price p, exact and unrounded.
 //
-// A provider that reports no cache writes is taken to have written every
-// uncached input token, as implicit prompt caching does; reported writes win.
+// With ImplicitCacheWrites, a zero cache write count is taken to mean every
+// uncached input token was written, as implicit prompt caching does; reported
+// writes win. Without it the usage is priced exactly as reported.
 // Reasoning tokens are part of Output and are not counted again.
 func RunCost(u Usage, p Price) *big.Rat {
 	input, cached, output := max(u.Input, 0), max(u.Cached, 0), max(u.Output, 0)
 	written := max(u.CacheWrite, 0)
-	if written == 0 {
+	if written == 0 && u.ImplicitCacheWrites {
 		written = max(input-cached, 0)
 	}
 	ordinary := max(input-cached-written, 0)

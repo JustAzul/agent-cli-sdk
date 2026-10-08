@@ -147,6 +147,25 @@ type ModelCatalog interface {
 	CatalogModels(env []string) ([]string, error)
 }
 
+// ImplicitCaching is a provider that caches prompts without being asked and
+// reports no cache writes: the uncached input of a run is then taken as
+// written when pricing it.
+type ImplicitCaching interface {
+	ImplicitCacheWrites() bool
+}
+
+// HasImplicitCacheWrites reports whether the named provider is registered and
+// caches prompts implicitly. An unregistered provider, such as a model-call
+// provider, or one without the capability, does not.
+func HasImplicitCacheWrites(name string) bool {
+	p, ok := Get(name)
+	if !ok {
+		return false
+	}
+	caching, ok := p.(ImplicitCaching)
+	return ok && caching.ImplicitCacheWrites()
+}
+
 // Provider adapts one agent CLI.
 type Provider interface {
 	Name() string
