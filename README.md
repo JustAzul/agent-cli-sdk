@@ -65,6 +65,36 @@ Versions follow [Semantic Versioning](https://semver.org). Each one has a
 list the commits since the previous one. Its tag, `v<version>`,
 names that version's build, which stays there after `dist` moves on.
 
+### Pin a version
+
+To stay on one version, install from a marketplace of your own whose entry
+names the tag. Put this in `<dir>/.claude-plugin/marketplace.json`:
+
+```json
+{
+  "name": "agentcli-pinned",
+  "owner": { "name": "you" },
+  "plugins": [
+    {
+      "name": "agentcli",
+      "description": "agentcli pinned to one version",
+      "source": { "source": "github", "repo": "JustAzul/agentcli", "ref": "v0.4.0" }
+    }
+  ]
+}
+```
+
+Then uninstall `agentcli@agentcli` if you have it, and install the pinned one:
+
+```sh
+claude plugin marketplace add <dir>
+claude plugin install agentcli@agentcli-pinned
+```
+
+To move to another version, change the `ref` and run
+`claude plugin marketplace update agentcli-pinned` and
+`claude plugin update agentcli@agentcli-pinned`.
+
 ### Moving from agent-cli-sdk
 
 The project was called `agent-cli-sdk`, its plugin `agent-cli`. Remove the old
