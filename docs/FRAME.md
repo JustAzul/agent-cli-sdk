@@ -88,6 +88,12 @@ type ModelCatalog interface {
     PriceNamespace() string                         // codex: "openai"
     CatalogModels(env []string) ([]string, error)  // codex: `codex debug models`, models[].slug
 }
+
+// Optional: a provider that can tell what a run has used so far, from its own
+// session records. ok is false when there is nothing to report yet.
+type LiveUsageReporter interface {
+    LiveUsage(env []string, sessionID string, since time.Time) (u Usage, model string, ok bool, err error)
+}
 ```
 
 `Request` carries: command (`exec`/`review`/`resume`), prompt presence, cwd,
@@ -236,6 +242,9 @@ like the other locks.
 - Every e2e sandbox sets `AGENTCLI_PRICES_URL=off` unless the test sets it to the
   URL of an `httptest` server on 127.0.0.1 that serves a fixture price list
   (`testdata/prices/`).
+- Live-usage tests set `CODEX_HOME` to a temp directory and write a Codex session
+  file there (`sessions/<y>/<m>/<d>/rollout-<time>-<thread id>.jsonl`) holding
+  `turn_context` and `token_count` lines; the fake provider writes none itself.
 - `AGENTCLI_TEST_PRICES_TIMEOUT_MS` and `AGENTCLI_TEST_PRICES_MAX_BYTES` shorten
   the refresh's 20-second timeout and 32 MiB body limit for tests.
 - `AGENTCLI_TEST_SHUTDOWN_GRACE_MS` and `AGENTCLI_TEST_SHUTDOWN_DRAIN_MS`

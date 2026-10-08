@@ -163,6 +163,9 @@ Expected cached prices (US dollars per million tokens):
   - The triggers `precompute` and `plugin`, and any compaction with an `agentId`, schedule none.
 - [ ] **refresh on session start (FR77):** `session.start` → one `prices refresh --max-age 24h --json` runs from a timer callback, not inside the hook.
 - [ ] **re-read after a change (FR70, FR77):** a refresh answering `ran: true, changed: true` → the next poll runs `stats` again, even though no run ended.
+- [ ] **live cost of a running run (FR79):** a background run with provider session `T`, kept running by the fake, and the price cache holding `m-sol`. `CODEX_HOME/sessions/…/rollout-…-T.jsonl` has a `turn_context` with model `m-sol`, then `token_count` lines stamped after the run's start; the newest totals are `input 1,000,000, cached 800,000, cache_write 0, output 10,000, reasoning 2,000`. → `progress <run_id> --json` has `usage` with those counts and `cost_usd` `"0.680000"`.
+- [ ] **resumed conversation subtracts what came before (FR79):** the same file also holds a `token_count` stamped before the run's start with totals `input 400,000, cached 300,000, output 5,000`, and the newest totals are `input 1,400,000, cached 1,100,000, output 15,000` → `usage` is `input 1,000,000, cached 800,000, output 10,000` and `cost_usd` is `"0.680000"`.
+- [ ] **band shows the cost (FR80):** progress answers `cost_usd "0.123456"` for a flagged run that has run 95 s and whose newest step is `Reading the diff` → the band line is `agentcli · code-review · hook-stop · 1m 35s · $0.12 · Reading the diff`. With `"0.004000"` it shows `<$0.01`, and with null there is no cost part.
 
 ### Edge cases
 
@@ -189,6 +192,10 @@ Expected cached prices (US dollars per million tokens):
 - [ ] **usage errors come first (FR72):** `AGENTCLI_PRICES_URL=off agentcli prices refresh --max-age soon` → exit 2, not `reason: off`.
 - [ ] **corrupt cache (FR71):** `prices.json` holding `{` or `"v": 2` → `stats` reports null costs and `prices_checked_at: null`; `prices` reports `cached: false`; `refresh` makes a full GET and replaces the file.
 - [ ] **usage errors (FR72):** `prices refresh --max-age soon`, `--max-age -1h`, an unknown flag, or a positional argument → exit 2 with `sdk_status: usage_error`.
+- [ ] **no live usage yet (FR79):** no session file, a session file with no `token_count` after the run's start, or a conversation with no provider session id → `progress --json` exits 0 with `usage: null` and `cost_usd: null`.
+- [ ] **live usage without a price (FR79):** the session file's model is `m-hidden`, or there is no usable price cache → `usage` is set and `cost_usd` is null.
+- [ ] **model falls back to the request (FR79):** a session file with `token_count` lines but no `turn_context`, for a run requested with `--model m-sol` → `cost_usd` uses `m-sol`'s prices.
+- [ ] **torn session file (FR79):** the session file's last line is cut mid-object → it is ignored, and `usage` comes from the newest complete `token_count`.
 - [ ] **compaction during a refresh (FR77):** a compaction arrives while a `--max-age 24h` refresh is still running → no second process starts while it runs. When it ends (even with `reason: fresh`), exactly one queued `prices refresh --json` without `--max-age` starts.
 - [ ] **requests coalesce (FR77):** two compactions and a missing-price request arrive while one refresh runs → exactly one queued refresh runs after it, not three.
 - [ ] **missing price triggers once (FR77):** stats keeps answering `missing_prices: [m-new]` → exactly one refresh runs for `m-new` in this load.
@@ -215,6 +222,7 @@ Expected cached prices (US dollars per million tokens):
 ### Performance and limits
 
 - [ ] **refresh over a large history (FR72):** with 20,000 telemetry records, `prices refresh` completes. Record its wall time as a baseline.
+- [ ] **long session file (FR79, NFR Performance):** a 50 MB session file whose run events sit in its last 20 KB → `progress --json` returns the right `usage`. Record its wall time as a baseline; the file is read from its end.
 - [ ] **the age gate reads nothing else (FR72, NFR Performance):** with a fresh cache and an unreadable telemetry directory, `prices refresh --max-age 24h` exits 0 with `reason: fresh`.
 
 ## Edge Cases
