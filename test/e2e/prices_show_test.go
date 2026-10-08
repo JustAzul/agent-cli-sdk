@@ -120,4 +120,11 @@ func TestAnUnreadablePriceCacheIsWarnedAboutAndIgnored(t *testing.T) {
 	if strings.Count(r.stderr, "agentcli: warning: reading the price cache:") != 1 {
 		t.Errorf("prices stderr = %q, want one warning", r.stderr)
 	}
+	st := s.run("stats", "--all", "--json")
+	if st.code != 0 || st.json(t)["prices_checked_at"] != nil {
+		t.Errorf("stats: exit %d stdout %q", st.code, st.stdout)
+	}
+	if strings.Count(st.stderr, "agentcli: warning: reading the price cache:") != 1 {
+		t.Errorf("stats stderr = %q, want one warning", st.stderr)
+	}
 }

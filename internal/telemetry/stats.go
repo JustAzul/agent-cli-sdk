@@ -3,14 +3,21 @@ package telemetry
 import (
 	"bytes"
 	"encoding/json"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/JustAzul/agentcli/internal/prices"
 )
 
 // cleanOutputMaxBytes is the output size at or below which a successful hook
 // review counts as a proxy for "no findings".
 const cleanOutputMaxBytes = 40
+
+// unknownModel names the model of a run that recorded none.
+const unknownModel = "unknown"
 
 const proxyNote = "output_bytes is a PROXY for findings volume over SUCCESSFUL runs; " +
 	"falls back to this when the structured findings field is absent " +
@@ -193,9 +200,10 @@ func asInt(v any) (int64, bool) {
 }
 
 // ComputeStats summarizes folded runs. windowDays is nil for an unbounded
-// read. The keys are the retired analyzer's, with by_provider, usage_totals
-// and skipped added.
-func ComputeStats(runs []map[string]any, skipped Skipped, windowDays *int) *Obj {
+// read. The keys are the retired analyzer's, with by_provider, the usage and
+// cost totals, skipped and the price gaps added. cache is the price cache, nil
+// when there is no usable one: then no run is priced.
+func ComputeStats(runs []map[string]any, skipped Skipped, windowDays *int, cache *prices.Cache) *Obj {
 	entries := make([]entry, len(runs))
 	providers := newCounter()
 	for i, r := range runs {
@@ -254,9 +262,19 @@ func ComputeStats(runs []map[string]any, skipped Skipped, windowDays *int) *Obj 
 		out.Set("window_days", int64(*windowDays))
 	}
 	out.Set("by_provider", providers.obj(true))
-	out.Set("usage_totals", usageTotals(entries))
-	out.Set("usage_by_model", usageByModel(entries))
+	unpriced, missing := priceGaps(entries, cache)
+	totals := usageTotals(entries, cache)
+	totals.Set("cost_complete", len(unpriced) == 0)
+	out.Set("usage_totals", totals)
+	out.Set("usage_by_model", usageByModel(entries, cache))
 	out.Set("skipped", skipped)
+	out.Set("unpriced_models", unpriced)
+	out.Set("missing_prices", missing)
+	if cache == nil {
+		out.Set("prices_checked_at", nil)
+	} else {
+		out.Set("prices_checked_at", cache.CheckedAt.UTC().Format(time.RFC3339))
+	}
 	return out
 }
 
@@ -398,11 +416,11 @@ func modelOf(run map[string]any) string {
 			return m
 		}
 	}
-	return "unknown"
+	return unknownModel
 }
 
 // usageByModel is usageTotals for each model, the models in name order.
-func usageByModel(entries []entry) *Obj {
+func usageByModel(entries []entry, cache *prices.Cache) *Obj {
 	byModel := map[string][]entry{}
 	for _, e := range entries {
 		if e.hasUsage {
@@ -416,15 +434,78 @@ func usageByModel(entries []entry) *Obj {
 	sort.Strings(models)
 	out := &Obj{}
 	for _, m := range models {
-		out.Set(m, usageTotals(byModel[m]))
+		out.Set(m, usageTotals(byModel[m], cache))
 	}
 	return out
 }
 
-func usageTotals(entries []entry) *Obj {
+// Cost is a sum of run costs in US dollars, kept exact. It encodes as a
+// decimal string with six places, rounded once.
+type Cost struct{ usd *big.Rat }
+
+// MarshalJSON encodes the cost as a string of six decimal places.
+func (c Cost) MarshalJSON() ([]byte, error) { return json.Marshal(prices.FormatUSD(c.usd)) }
+
+// Cents is the cost in dollars rounded half up to cents.
+func (c Cost) Cents() string { return prices.FormatCents(c.usd) }
+
+// runCost prices a run with usage at the cache's price for its provider and
+// model; ok is false when it has none. A run of no known model ("unknown")
+// is never priced.
+func runCost(e entry, cache *prices.Cache) (cost *big.Rat, ok bool) {
+	if cache == nil || e.model == unknownModel {
+		return nil, false
+	}
+	price, found := cache.Lookup(e.provider, e.model)
+	if !found {
+		return nil, false
+	}
+	count := func(key string) int64 {
+		n, _ := asInt(e.usage[key])
+		return n
+	}
+	return prices.RunCost(prices.Usage{
+		Input: count("input_tokens"), Cached: count("cached_input_tokens"),
+		CacheWrite: count("cache_write_input_tokens"), Output: count("output_tokens"),
+	}, price), true
+}
+
+// priceGaps lists the models of the runs with usage that have no price, and
+// those of them the cache has no verdict on at all, each sorted and distinct.
+// The lists are never nil, so they encode as arrays.
+func priceGaps(entries []entry, cache *prices.Cache) (unpriced, missing []string) {
+	unpricedSet, missingSet := map[string]bool{}, map[string]bool{}
+	for _, e := range entries {
+		if !e.hasUsage {
+			continue
+		}
+		if _, ok := runCost(e, cache); ok {
+			continue
+		}
+		unpricedSet[e.model] = true
+		if e.model != unknownModel && (cache == nil || !cache.Knows(e.provider, e.model)) {
+			missingSet[e.model] = true
+		}
+	}
+	return sortedKeys(unpricedSet), sortedKeys(missingSet)
+}
+
+func sortedKeys(set map[string]bool) []string {
+	keys := make([]string, 0, len(set))
+	for k := range set {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// usageTotals sums the usage of the runs that have it and the cost of those
+// the cache prices: cost_usd is null when none is priced.
+func usageTotals(entries []entry, cache *prices.Cache) *Obj {
 	keys := []string{"input_tokens", "cached_input_tokens", "cache_write_input_tokens", "output_tokens", "reasoning_output_tokens"}
 	sums := make([]int64, len(keys))
-	var runs int64
+	var runs, pricedRuns int64
+	cost := new(big.Rat)
 	for _, e := range entries {
 		if !e.hasUsage {
 			continue
@@ -434,11 +515,20 @@ func usageTotals(entries []entry) *Obj {
 			n, _ := asInt(e.usage[k])
 			sums[i] += n
 		}
+		if c, ok := runCost(e, cache); ok {
+			pricedRuns++
+			cost.Add(cost, c)
+		}
 	}
 	o := &Obj{}
 	for i, k := range keys {
 		o.Set(k, sums[i])
 	}
 	o.Set("runs_with_usage", runs)
+	if pricedRuns == 0 {
+		o.Set("cost_usd", nil)
+	} else {
+		o.Set("cost_usd", Cost{cost})
+	}
 	return o
 }

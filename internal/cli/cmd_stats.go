@@ -3,8 +3,10 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
+	"github.com/JustAzul/agentcli/internal/store"
 	"github.com/JustAzul/agentcli/internal/telemetry"
 )
 
@@ -26,7 +28,11 @@ func runStats(ctx *Context, args []string) int {
 	if !w.all {
 		days = &w.days
 	}
-	stats := telemetry.ComputeStats(folded.Runs, folded.Skipped, days)
+	home, err := store.ResolveHome(ctx.Getenv)
+	if err != nil {
+		return ctx.Fail(ExitInternal, "%v", err)
+	}
+	stats := telemetry.ComputeStats(folded.Runs, folded.Skipped, days, readPriceCache(ctx, store.Open(home)))
 	if asJSON {
 		data, err := json.MarshalIndent(stats, "", "  ")
 		if err != nil {
@@ -60,25 +66,56 @@ func printStatsSummary(ctx *Context, stats *telemetry.Obj, skipped telemetry.Ski
 			fmt.Fprintf(ctx.Stdout, "reviews with structured findings: %v (%v with findings)\n", f.Get("instrumented_reviews"), f.Get("reviews_with_findings"))
 		}
 	}
-	if u, ok := stats.Get("usage_totals").(*telemetry.Obj); ok && u.Get("runs_with_usage") != int64(0) {
-		fmt.Fprintf(ctx.Stdout, "tokens: %s (%v runs with usage)\n", countsLine(withoutKey(u, "runs_with_usage")), u.Get("runs_with_usage"))
+	tokenCounts := func(u *telemetry.Obj) string {
+		return countsLine(withoutKey(u, "runs_with_usage", "cost_usd", "cost_complete"))
 	}
-	if byModel, ok := stats.Get("usage_by_model").(*telemetry.Obj); ok {
+	totals, _ := stats.Get("usage_totals").(*telemetry.Obj)
+	byModel, _ := stats.Get("usage_by_model").(*telemetry.Obj)
+	if totals != nil && totals.Get("runs_with_usage") != int64(0) {
+		fmt.Fprintf(ctx.Stdout, "tokens: %s (%v runs with usage)\n", tokenCounts(totals), totals.Get("runs_with_usage"))
+	}
+	if byModel != nil {
 		for _, p := range byModel.Pairs() {
 			u := p.Value.(*telemetry.Obj)
-			fmt.Fprintf(ctx.Stdout, "tokens %s: %s (%v runs)\n", p.Key, countsLine(withoutKey(u, "runs_with_usage")), u.Get("runs_with_usage"))
+			fmt.Fprintf(ctx.Stdout, "tokens %s: %s (%v runs)\n", p.Key, tokenCounts(u), u.Get("runs_with_usage"))
 		}
 	}
+	printCosts(ctx, stats, totals, byModel)
 	if n := skipped.Total(); n > 0 {
 		fmt.Fprintf(ctx.Stdout, "skipped lines: %d (unknown_kind=%d unknown_version=%d unparseable=%d)\n",
 			n, skipped.UnknownKind, skipped.UnknownVersion, skipped.Unparseable)
 	}
 }
 
-func withoutKey(o *telemetry.Obj, key string) *telemetry.Obj {
+// printCosts writes the session cost, then the cost of each priced model. A
+// cost that is null prints no line.
+func printCosts(ctx *Context, stats, totals, byModel *telemetry.Obj) {
+	if totals == nil || byModel == nil {
+		return
+	}
+	if cost, ok := totals.Get("cost_usd").(telemetry.Cost); ok {
+		line := "cost: $" + cost.Cents()
+		if totals.Get("cost_complete") == false {
+			line += fmt.Sprintf(" (incomplete: %s)", strings.Join(unpricedModels(stats), ", "))
+		}
+		fmt.Fprintln(ctx.Stdout, line)
+	}
+	for _, p := range byModel.Pairs() {
+		if cost, ok := p.Value.(*telemetry.Obj).Get("cost_usd").(telemetry.Cost); ok {
+			fmt.Fprintf(ctx.Stdout, "cost %s: $%s\n", p.Key, cost.Cents())
+		}
+	}
+}
+
+func unpricedModels(stats *telemetry.Obj) []string {
+	models, _ := stats.Get("unpriced_models").([]string)
+	return models
+}
+
+func withoutKey(o *telemetry.Obj, keys ...string) *telemetry.Obj {
 	out := &telemetry.Obj{}
 	for _, p := range o.Pairs() {
-		if p.Key != key {
+		if !slices.Contains(keys, p.Key) {
 			out.Set(p.Key, p.Value)
 		}
 	}

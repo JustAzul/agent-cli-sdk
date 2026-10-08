@@ -3,11 +3,13 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -132,4 +134,43 @@ func writeCache(t *testing.T, s *sandbox, c map[string]any) {
 	if err := os.WriteFile(pricesPath(s), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// costCache writes the price cache the cost cases read: the fixture prices of
+// m-sol, m-old and m-bare under codex (half a cent per million for m-half) and
+// m-hidden unpriced, last checked at costCheckedAt.
+func costCache(t *testing.T, s *sandbox) {
+	t.Helper()
+	if err := os.MkdirAll(s.home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	price := func(in, cached, write, out string) map[string]any {
+		return map[string]any{"input": in, "cached_input": cached, "cache_write": write, "output": out}
+	}
+	writeCache(t, s, map[string]any{
+		"v": 1, "source": "https://prices.example/list.json", "etag": nil,
+		"fetched_at": costCheckedAt, "checked_at": costCheckedAt, "unit": "usd_per_1m_tokens",
+		"models": map[string]any{"codex": map[string]any{
+			"m-sol":  price("2", "0.1", "2.5", "10"),
+			"m-old":  price("5", "0.5", "5", "30"),
+			"m-bare": price("1", "1", "1", "4"),
+			"m-half": price("0.5", "0.5", "0.5", "0.5"),
+		}},
+		"unpriced": map[string]any{"codex": []string{"m-hidden"}},
+	})
+}
+
+const costCheckedAt = "2026-10-07T12:00:00Z"
+
+// tokens is a run's usage as telemetry records it.
+type tokens struct{ input, cached, write, output, reasoning int64 }
+
+// usageRun is the record fields of a run of a model with that usage.
+func usageRun(model string, u tokens, extra ...string) string {
+	fields := []string{fmt.Sprintf(`"usage":{"input_tokens":%d,"cached_input_tokens":%d,"cache_write_input_tokens":%d,"output_tokens":%d,"reasoning_output_tokens":%d}`,
+		u.input, u.cached, u.write, u.output, u.reasoning)}
+	if model != "" {
+		fields = append(fields, fmt.Sprintf(`"model_used":%q`, model))
+	}
+	return strings.Join(append(fields, extra...), ",")
 }

@@ -37,7 +37,8 @@ func TestStatsParityWithTheRetiredAnalyzer(t *testing.T) {
 		}
 	}
 	// Only keys the analyzer never had may be extra.
-	wantKeys := append(append([]string(nil), keysOf(expected)...), "by_provider", "usage_totals", "usage_by_model", "skipped")
+	wantKeys := append(append([]string(nil), keysOf(expected)...), "by_provider", "usage_totals", "usage_by_model", "skipped",
+		"unpriced_models", "missing_prices", "prices_checked_at")
 	if g := keysOf(actual); !reflect.DeepEqual(g, sortedCopy(wantKeys)) {
 		t.Errorf("stats keys = %v, want %v", g, sortedCopy(wantKeys))
 	}
@@ -49,11 +50,20 @@ func TestStatsParityWithTheRetiredAnalyzer(t *testing.T) {
 	if !reflect.DeepEqual(actual["by_provider"], map[string]any{"codex": float64(22)}) {
 		t.Errorf("by_provider = %v", actual["by_provider"])
 	}
+	for _, k := range []string{"unpriced_models", "missing_prices"} {
+		if !reflect.DeepEqual(actual[k], []any{}) {
+			t.Errorf("%s = %#v, want an empty list", k, actual[k])
+		}
+	}
+	if v, ok := actual["prices_checked_at"]; !ok || v != nil {
+		t.Errorf("prices_checked_at = %#v (present %v), want null", v, ok)
+	}
 	if !reflect.DeepEqual(actual["skipped"], map[string]any{"unknown_kind": float64(0), "unknown_version": float64(0), "unparseable": float64(0)}) {
 		t.Errorf("skipped = %v", actual["skipped"])
 	}
 	wantUsage := map[string]any{"input_tokens": float64(0), "cached_input_tokens": float64(0), "cache_write_input_tokens": float64(0),
-		"output_tokens": float64(0), "reasoning_output_tokens": float64(0), "runs_with_usage": float64(0)}
+		"output_tokens": float64(0), "reasoning_output_tokens": float64(0), "runs_with_usage": float64(0),
+		"cost_usd": nil, "cost_complete": true}
 	if !reflect.DeepEqual(actual["usage_totals"], wantUsage) {
 		t.Errorf("usage_totals = %v", actual["usage_totals"])
 	}
