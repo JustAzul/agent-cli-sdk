@@ -299,7 +299,15 @@ func TestJobTerminalOrdering(t *testing.T) {
 	}
 
 	releaseTel()
-	untilTrue(t, "the telemetry record", func() bool { return len(telFiles()) == 1 })
+	// The month file exists, empty, before its line is written: wait for a whole line.
+	untilTrue(t, "the telemetry record", func() bool {
+		files := telFiles()
+		if len(files) != 1 {
+			return false
+		}
+		b, err := os.ReadFile(files[0])
+		return err == nil && len(b) > 0 && b[len(b)-1] == '\n'
+	})
 	checkFields(t, "record", oneRecord(t, s.home), map[string]any{"run_id": "jord1", "outcome": "ok", "background": true})
 }
 
