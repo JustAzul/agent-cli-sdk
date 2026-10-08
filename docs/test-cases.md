@@ -193,6 +193,8 @@ Expected cached prices (US dollars per million tokens):
 - [ ] **corrupt cache (FR71):** `prices.json` holding `{` or `"v": 2` → `stats` reports null costs and `prices_checked_at: null`; `prices` reports `cached: false`; `refresh` makes a full GET and replaces the file.
 - [ ] **usage errors (FR72):** `prices refresh --max-age soon`, `--max-age -1h`, an unknown flag, or a positional argument → exit 2 with `sdk_status: usage_error`.
 - [ ] **no live usage yet (FR79):** no session file, a session file with no `token_count` after the run's start, or a conversation with no provider session id → `progress --json` exits 0 with `usage: null` and `cost_usd: null`.
+- [ ] **ended run reports no live usage (FR79):** a run that has ended (`done`) whose session file holds `token_count` lines, some of them from a later turn → `progress --json` has `usage: null` and `cost_usd: null`.
+- [ ] **unreadable session file (FR79):** the session file path is a directory → `progress --json` exits 0 with `usage: null`, `cost_usd: null` and one `agentcli: warning:` line on stderr; with no session file at all, stderr stays empty.
 - [ ] **live usage without a price (FR79):** the session file's model is `m-hidden`, or there is no usable price cache → `usage` is set and `cost_usd` is null.
 - [ ] **model falls back to the request (FR79):** a session file with `token_count` lines but no `turn_context`, for a run requested with `--model m-sol` → `cost_usd` uses `m-sol`'s prices.
 - [ ] **torn session file (FR79):** the session file's last line is cut mid-object → it is ignored, and `usage` comes from the newest complete `token_count`.
