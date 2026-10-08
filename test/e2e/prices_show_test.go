@@ -105,3 +105,19 @@ func TestPricesUsageErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestAnUnreadablePriceCacheIsWarnedAboutAndIgnored(t *testing.T) {
+	s := newSandbox(t)
+	// A directory where the file should be makes reading it fail with an
+	// error other than "does not exist".
+	if err := os.MkdirAll(pricesPath(s), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	r := s.run("prices")
+	if r.code != 0 || r.stdout != "no price cache: run agentcli prices refresh\n" {
+		t.Errorf("prices: exit %d stdout %q", r.code, r.stdout)
+	}
+	if strings.Count(r.stderr, "agentcli: warning: reading the price cache:") != 1 {
+		t.Errorf("prices stderr = %q, want one warning", r.stderr)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"math/big"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -59,7 +60,7 @@ func runPricesShow(ctx *Context, args []string) int {
 	if err != nil {
 		return ctx.Fail(ExitInternal, "%v", err)
 	}
-	cache := readPriceCache(store.Open(home))
+	cache := readPriceCache(ctx, store.Open(home))
 	if cache == nil {
 		if ctx.JSON {
 			return printJSON(ctx, map[string]any{"cached": false})
@@ -186,19 +187,19 @@ func runPricesRefresh(ctx *Context, args []string) int {
 	rep := refreshReport{SDKStatus: sdkStatusFor(ExitOK), Source: url}
 	if url == "off" {
 		rep.Reason = "off"
-		return printRefresh(ctx, rep, readPriceCache(st))
+		return printRefresh(ctx, rep, readPriceCache(ctx, st))
 	}
 	release, err := st.LockPrices()
 	if errors.Is(err, store.ErrPricesLockHeld) {
 		rep.Reason = "busy"
-		return printRefresh(ctx, rep, readPriceCache(st))
+		return printRefresh(ctx, rep, readPriceCache(ctx, st))
 	}
 	if err != nil {
 		return ctx.Fail(ExitInternal, "locking the price cache: %v", err)
 	}
 	defer release()
 
-	cache := readPriceCache(st)
+	cache := readPriceCache(ctx, st)
 	if ageGiven && cache != nil && cache.CheckedAt.Before(ctx.Now()) && ctx.Now().Sub(cache.CheckedAt) < age {
 		rep.Reason = "fresh"
 		return printRefresh(ctx, rep, cache)
@@ -214,13 +215,25 @@ func runPricesRefresh(ctx *Context, args []string) int {
 		rep.Reason = "nothing_wanted"
 		return printRefresh(ctx, rep, cache)
 	}
-	return fetchPrices(ctx, st, url, cache, wanted, namespaces, rep)
+	return fetchPrices(ctx, refreshInput{st: st, url: url, cache: cache, wanted: wanted, namespaces: namespaces}, rep)
+}
+
+// refreshInput is what a refresh that goes to the source works from: the
+// store, the source URL, the cache as read, and the wanted models per provider
+// with each provider's price-list namespace.
+type refreshInput struct {
+	st         *store.Store
+	url        string
+	cache      *prices.Cache
+	wanted     map[string][]string
+	namespaces map[string]string
 }
 
 // fetchPrices asks the source for the wanted models' prices and stores what it
 // answers. A 304 only advances checked_at; a 200 replaces the cache, as long
 // as it prices at least one wanted model.
-func fetchPrices(ctx *Context, st *store.Store, url string, cache *prices.Cache, wanted map[string][]string, namespaces map[string]string, rep refreshReport) int {
+func fetchPrices(ctx *Context, in refreshInput, rep refreshReport) int {
+	st, url, cache, wanted, namespaces := in.st, in.url, in.cache, in.wanted, in.namespaces
 	// The cached entity tag vouches only for the same source and for a cache
 	// that already holds a verdict on every wanted model.
 	etag := ""
@@ -263,7 +276,7 @@ func fetchPrices(ctx *Context, st *store.Store, url string, cache *prices.Cache,
 func unavailable(ctx *Context, rep refreshReport, cache *prices.Cache, cause error) int {
 	rep.SDKStatus, rep.ExitCode = sdkStatusFor(ExitPricesUnavailable), ExitPricesUnavailable
 	rep.Ran, rep.Changed, rep.Reason, rep.Error = true, false, "unavailable", cause.Error()
-	describePriceCache(&rep, cache)
+	rep = describePriceCache(rep, cache)
 	if ctx.JSON {
 		if printJSON(ctx, rep) != 0 {
 			return ExitInternal
@@ -312,10 +325,14 @@ func fetchOptions(ctx *Context) prices.FetchOptions {
 }
 
 // readPriceCache returns the usable price cache, or nil: an absent, unreadable
-// or unparseable file is no cache.
-func readPriceCache(st *store.Store) *prices.Cache {
+// or unparseable file is no cache. A file that exists but cannot be read is
+// reported with one warning.
+func readPriceCache(ctx *Context, st *store.Store) *prices.Cache {
 	data, err := st.ReadPrices()
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			ctx.Warnf("reading the price cache: %v", err)
+		}
 		return nil
 	}
 	cache, err := prices.Decode(data)
@@ -382,7 +399,7 @@ func modelOfRun(run map[string]any) string {
 // printRefresh prints a refresh that did not fail, describing the cache as it
 // stands: one JSON object with --json, else one line.
 func printRefresh(ctx *Context, rep refreshReport, cache *prices.Cache) int {
-	describePriceCache(&rep, cache)
+	rep = describePriceCache(rep, cache)
 	if ctx.JSON {
 		return printJSON(ctx, rep)
 	}
@@ -390,12 +407,12 @@ func printRefresh(ctx *Context, rep refreshReport, cache *prices.Cache) int {
 	return ExitOK
 }
 
-// describePriceCache fills the report fields that describe the cache; both
-// lists are sorted provider/model names and never nil.
-func describePriceCache(rep *refreshReport, cache *prices.Cache) {
+// describePriceCache returns rep with the fields that describe the cache set;
+// both lists are sorted provider/model names and never nil.
+func describePriceCache(rep refreshReport, cache *prices.Cache) refreshReport {
 	rep.Priced, rep.Unpriced, rep.CheckedAt = []string{}, []string{}, nil
 	if cache == nil {
-		return
+		return rep
 	}
 	for provider, models := range cache.Models {
 		for model := range models {
@@ -411,4 +428,5 @@ func describePriceCache(rep *refreshReport, cache *prices.Cache) {
 	slices.Sort(rep.Unpriced)
 	at := cache.CheckedAt.UTC().Format(time.RFC3339)
 	rep.CheckedAt = &at
+	return rep
 }
