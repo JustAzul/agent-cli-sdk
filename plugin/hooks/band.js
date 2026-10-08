@@ -51,7 +51,7 @@ function newFollowed(run) {
 export function bandLine(run, now) {
   const parts = ['agentcli', run.scenario, run.source]
   if (run.startedAt !== null) parts.push(formatElapsed(now - run.startedAt))
-  parts.push(formatCost(run.cost, true) ?? '')
+  parts.push(formatCost(run.cost) ?? '')
   if (run.line !== '') parts.push(run.line.replace(/\s+/g, ' ').trim().slice(0, PROGRESS_CHARS))
   return parts.filter((part) => part !== '').join(' · ')
 }

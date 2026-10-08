@@ -53,7 +53,9 @@ import {
   typeOf,
 } from './subagent.js'
 import {
+  FULL_REFRESH,
   REFRESH_TIMEOUT_MS,
+  SESSION_START_REFRESH,
   isRefreshedByCompaction,
   mergeRefreshRequests,
   refreshCommand,
@@ -135,7 +137,7 @@ export function register(on) {
     bandTimer = $.clock.every(BAND_REFRESH_MS, () => {
       void refreshBand($)
     })
-    requestRefresh($, true)
+    requestRefresh($, SESSION_START_REFRESH)
     // Last, because a taken command name makes the call throw.
     try {
       await $.command.register({
@@ -154,7 +156,7 @@ export function register(on) {
   // used before, so the prices are looked at again. The refresh runs on a timer:
   // the compaction never waits for it.
   on('session.compact', async ($, e, next) => {
-    if (isRefreshedByCompaction(e)) requestRefresh($, false)
+    if (isRefreshedByCompaction(e)) requestRefresh($, FULL_REFRESH)
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -426,14 +428,14 @@ function askForPrices($, models) {
   const unasked = models.filter((model) => !pricedModels.has(model))
   if (unasked.length === 0) return
   for (const model of unasked) pricedModels.add(model)
-  requestRefresh($, false)
+  requestRefresh($, FULL_REFRESH)
 }
 
 // requestRefresh asks for a price refresh and returns at once: the refresh runs
 // from a timer, never inside the hook or the poll that asked. Requests that
 // reach it before it starts, or while one runs, come to a single queued one.
-function requestRefresh($, hasMaxAge) {
-  queuedRefresh = mergeRefreshRequests(queuedRefresh, { hasMaxAge })
+function requestRefresh($, request) {
+  queuedRefresh = mergeRefreshRequests(queuedRefresh, request)
   if (isRefreshing) return
   isRefreshing = true
   $.clock.after(0, () => {
@@ -446,7 +448,7 @@ async function runRefreshes($) {
     while (queuedRefresh !== null) {
       const request = queuedRefresh
       queuedRefresh = null
-      await refreshPrices($, request.hasMaxAge)
+      await refreshPrices($, request)
     }
   } finally {
     isRefreshing = false
@@ -455,10 +457,10 @@ async function runRefreshes($) {
 
 // refreshPrices runs one refresh. A change to the prices makes the next poll
 // read the session's cost again; a failure is logged once until one succeeds.
-async function refreshPrices($, hasMaxAge) {
+async function refreshPrices($, request) {
   let outcome
   try {
-    const reply = await $.process.run(refreshCommand(shimPath($.plugin.root), hasMaxAge), { timeoutMs: REFRESH_TIMEOUT_MS })
+    const reply = await $.process.run(refreshCommand(shimPath($.plugin.root), request), { timeoutMs: REFRESH_TIMEOUT_MS })
     outcome = refreshOutcome(reply)
   } catch (error) {
     outcome = { failure: messageOf(error), hasChanged: false }

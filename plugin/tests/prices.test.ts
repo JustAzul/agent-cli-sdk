@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import { POLL_MS, job, listing, ok, pricesRuns, world } from './kit'
 import type { Reply } from './kit'
 import { costText } from '../hooks/subagent.js'
-import { formatCost } from '../hooks/prices.js'
+import { formatCost, formatLowerBound, refreshOutcome } from '../hooks/prices.js'
 
 const stats = (cost: string | null, complete = true) => JSON.stringify({ usage_totals: { cost_usd: cost, cost_complete: complete, runs_with_usage: 1 } })
 
@@ -22,12 +22,23 @@ test('a cost rounds half up to cents on the decimal string, and a lower bound tr
 })
 
 test('a cost too large for a float still rounds exactly', () => {
-  expect(formatCost('9007199254740993.995000', true)).toBe('$9007199254740994.00')
-  expect(formatCost('9007199254740993.999999', false)).toBe('≥$9007199254740993.99')
+  expect(formatCost('9007199254740993.995000')).toBe('$9007199254740994.00')
+  expect(formatLowerBound('9007199254740993.999999')).toBe('≥$9007199254740993.99')
 })
 
 test('a cost that is not a decimal string shows nothing', () => {
-  for (const bad of [null, undefined, '', 'abc', '-1.000000', '1e-7', 5, '1.2.3']) expect(formatCost(bad as any, true)).toBeUndefined()
+  for (const bad of [null, undefined, '', 'abc', '-1.000000', '1e-7', 5, '1.2.3']) {
+    expect(formatCost(bad as any)).toBeUndefined()
+    expect(formatLowerBound(bad as any)).toBeUndefined()
+  }
+})
+
+test('a refresh report that is not the expected object counts as a failure', () => {
+  for (const stdout of ['{}', '[]', '"ok"', 'null', '{"ran":"true","changed":false,"reason":"updated"}', '{"ran":true,"changed":1,"reason":"updated"}', '{"ran":true,"changed":false}']) {
+    expect(refreshOutcome({ exitCode: 0, stdout, stderr: '' }).failure).not.toBeNull()
+  }
+  expect(refreshOutcome({ exitCode: 0, stdout: '{"ran":true,"changed":true,"reason":"updated"}', stderr: '' })).toEqual({ failure: null, hasChanged: true })
+  expect(refreshOutcome({ exitCode: 0, stdout: '{"ran":false,"changed":false,"reason":"fresh"}', stderr: '' })).toEqual({ failure: null, hasChanged: false })
 })
 
 // The refresh tests below use the world's fake agentcli (kit.ts).

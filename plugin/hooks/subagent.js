@@ -4,7 +4,7 @@
 // tested on their own.
 
 import { RESULT_OUTPUT_BYTES, cutBytes, isTerminal, resultNote } from './lib.js'
-import { formatCost } from './prices.js'
+import { formatCost, formatLowerBound } from './prices.js'
 
 export const AGENT_SOURCE = 'agent'
 export const DISPATCH_SKILL = 'dispatch'
@@ -268,7 +268,7 @@ export function sessionStatsCommand(bin, sessionId) {
 export function costText(stdout) {
   try {
     const totals = JSON.parse(stdout).usage_totals
-    const cost = formatCost(totals?.cost_usd, totals?.cost_complete === true)
+    const cost = totals?.cost_complete === true ? formatCost(totals.cost_usd) : formatLowerBound(totals?.cost_usd)
     return cost === undefined ? undefined : 'Codex ' + cost
   } catch {
     return undefined

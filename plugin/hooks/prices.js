@@ -18,32 +18,49 @@ const CENTS_PER_DOLLAR = 100n
 const ROUND_UP_FROM = 5
 
 // formatCost shows a cost, a decimal string of US dollars, in dollars and cents
-// without ever leaving integer arithmetic. A complete cost rounds half up, and
-// shows `<$0.01` when it is above zero and below half a cent. An incomplete
-// cost is only a lower bound, so it truncates to cents and is led by `≥`.
-// Anything that is not a decimal string shows nothing (undefined).
-export function formatCost(costUsd, isComplete) {
+// without ever leaving integer arithmetic: rounded half up, and `<$0.01` when
+// it is above zero and below half a cent. Anything that is not a decimal string
+// shows nothing (undefined).
+export function formatCost(costUsd) {
+  const cost = parseCost(costUsd)
+  if (cost === null) return undefined
+  const rounded = cost.cents + (cost.isHalfCentOrMoreLeft ? 1n : 0n)
+  return rounded === 0n && cost.isAboveZero ? '<$0.01' : dollars(rounded)
+}
+
+// formatLowerBound shows a cost that is only a lower bound, part of the usage
+// having no price: truncated to cents, so it never overstates, and led by `≥`.
+export function formatLowerBound(costUsd) {
+  const cost = parseCost(costUsd)
+  return cost === null ? undefined : '≥' + dollars(cost.cents)
+}
+
+// parseCost reads a decimal string of dollars into whole cents and what is
+// left past them, or null when it is not one.
+function parseCost(costUsd) {
   const match = typeof costUsd === 'string' ? DECIMAL.exec(costUsd) : null
-  if (match === null) return undefined
-
+  if (match === null) return null
   const fraction = match[2] ?? ''
-  const cents = BigInt(match[1]) * CENTS_PER_DOLLAR + BigInt(fraction.slice(0, 2).padEnd(2, '0'))
-  if (!isComplete) return '≥' + dollars(cents)
-
   const rest = fraction.slice(2)
-  const rounded = cents + (rest !== '' && Number(rest[0]) >= ROUND_UP_FROM ? 1n : 0n)
-  const isAboveZero = /[1-9]/.test(match[1] + fraction)
-  return rounded === 0n && isAboveZero ? '<$0.01' : dollars(rounded)
+  return {
+    cents: BigInt(match[1]) * CENTS_PER_DOLLAR + BigInt(fraction.slice(0, 2).padEnd(2, '0')),
+    isHalfCentOrMoreLeft: rest !== '' && Number(rest[0]) >= ROUND_UP_FROM,
+    isAboveZero: /[1-9]/.test(match[1] + fraction),
+  }
 }
 
 function dollars(cents) {
   return '$' + cents / CENTS_PER_DOLLAR + '.' + String(cents % CENTS_PER_DOLLAR).padStart(2, '0')
 }
 
-// refreshCommand is `prices refresh`; hasMaxAge lets a cache checked within the
-// session-start window stand.
-export function refreshCommand(bin, hasMaxAge) {
-  const maxAge = hasMaxAge ? ['--max-age', SESSION_START_MAX_AGE] : []
+// The two refreshes the mod asks for: the session-start one lets a cache
+// checked within a day stand; the full one always asks the source.
+export const SESSION_START_REFRESH = Object.freeze({ maxAge: SESSION_START_MAX_AGE })
+export const FULL_REFRESH = Object.freeze({ maxAge: null })
+
+// refreshCommand is `prices refresh` for one of the requests above.
+export function refreshCommand(bin, request) {
+  const maxAge = request.maxAge === null ? [] : ['--max-age', request.maxAge]
   return [bin, 'prices', 'refresh', ...maxAge, '--json']
 }
 
@@ -51,7 +68,7 @@ export function refreshCommand(bin, hasMaxAge) {
 // to: it may skip a fresh cache only if every request it stands for may.
 export function mergeRefreshRequests(queued, request) {
   if (queued === null) return request
-  return { hasMaxAge: queued.hasMaxAge && request.hasMaxAge }
+  return queued.maxAge !== null && request.maxAge !== null ? queued : FULL_REFRESH
 }
 
 // isRefreshedByCompaction tells a compaction of the main conversation, by the
@@ -68,9 +85,22 @@ export function refreshOutcome(reply) {
   if (reply.exitCode !== 0) return { failure: failureText(reply), hasChanged: false }
   try {
     const report = JSON.parse(reply.stdout)
-    if (report && typeof report === 'object') return { failure: null, hasChanged: report.ran === true && report.changed === true }
+    if (isRefreshReport(report)) return { failure: null, hasChanged: report.ran && report.changed }
   } catch {
     // Reported below as unexpected output.
   }
   return { failure: 'agentcli printed an unexpected refresh report: ' + String(reply.stdout).trim().slice(0, 200), hasChanged: false }
+}
+
+// isRefreshReport tells the report `prices refresh --json` prints from anything
+// else: an object whose ran and changed are booleans and whose reason is text.
+function isRefreshReport(report) {
+  return (
+    report !== null &&
+    typeof report === 'object' &&
+    !Array.isArray(report) &&
+    typeof report.ran === 'boolean' &&
+    typeof report.changed === 'boolean' &&
+    typeof report.reason === 'string'
+  )
 }
