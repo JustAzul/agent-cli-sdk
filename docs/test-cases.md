@@ -434,7 +434,7 @@ Expected costs (US dollars):
 - [ ] **auto prune failure is loud (FR61):** the `runs` directory is read-only so a removal fails → `prune --auto` exits 70 and prints the reason on stderr.
 - [ ] **indexed run directory gone (FR62):** the index lists a run whose directory was deleted → `status --session-id S` skips it without a warning and lists the others.
 - [ ] **CI stale publish (FR40):** the dist workflow run for commit A finishes after commit B landed → the HEAD check fails and `dist` is not updated by A.
-- [ ] **version not semantic (FR93):** `VERSION` is `0.4`, `v0.4.0`, `0.04.0`, `0.4.0-`, `0.4.0-rc..1` or `0.4.0+` → `publish-release.sh` exits 2 saying the version is not a semantic version, and `gh` is never called.
+- [ ] **version not semantic (FR93):** `VERSION` is `0.4`, `v0.4.0`, `0.04.0`, `0.4.0-`, `0.4.0-rc..1`, `0.4.0+`, or a valid version followed by a second line → `publish-release.sh` exits 2 saying the version is not a semantic version, and `gh` is never called.
 
 ---
 

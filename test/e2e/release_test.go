@@ -171,15 +171,18 @@ func TestPublishReleaseTagsTheDistBuildOfANewVersion(t *testing.T) {
 		!strings.HasPrefix(calls[1], "release create v0.3.0 --target "+distSHA+" --title v0.3.0 --notes-file ") {
 		t.Fatalf("gh calls = %q", calls)
 	}
-	notes := runScript(t, dir, "release-notes.sh", nil, source)
-	if got := readFile(t, notesPath); got != notes.stdout || notes.stdout == "" {
-		t.Errorf("release notes = %q, want the release-notes.sh output %q", got, notes.stdout)
+	want := "Build of " + source + ".\n" +
+		"\n### Features\n- feat(cli): add a flag (" + shortSHA(t, dir, shas[3]) + ")\n" +
+		"\n### Fixes\n- fix: handle an empty file (" + shortSHA(t, dir, shas[4]) + ")\n" +
+		"\n### Other\n- docs: describe the flag (" + shortSHA(t, dir, shas[5]) + ")\n"
+	if got := readFile(t, notesPath); got != want {
+		t.Errorf("release notes:\n%s\nwant:\n%s", got, want)
 	}
 }
 
 func TestPublishReleaseRefusesAVersionThatIsNotSemVer(t *testing.T) {
-	for _, version := range []string{"0.4", "v0.4.0", "0.04.0", "0.4.0-", "0.4.0-rc..1", "0.4.0+"} {
-		t.Run(version, func(t *testing.T) {
+	for _, version := range []string{"0.4", "v0.4.0", "0.04.0", "0.4.0-", "0.4.0-rc..1", "0.4.0+", "1.2.3\ngarbage"} {
+		t.Run(strings.ReplaceAll(version, "\n", `\n`), func(t *testing.T) {
 			dir, shas := newReleaseRepo(t, commitSpec{"chore: bootstrap", version})
 			env, logPath, _ := fakeGHEnv(t, "1")
 

@@ -23,6 +23,11 @@ semver="^$number\\.$number\\.$number(-$identifier(\\.$identifier)*)?(\\+[0-9A-Za
 dist=$1
 source=$2
 version=$(git show "$source:VERSION")
+# grep matches line by line, so a second line would pass unchecked.
+case $version in
+*"
+"*) die "VERSION has more than one line, so it is not a semantic version" ;;
+esac
 printf '%s\n' "$version" | grep -Eq "$semver" || die "VERSION $version is not a semantic version"
 tag=v$version
 case ${version%%+*} in
