@@ -1,6 +1,6 @@
 # Verification Checklist: agentcli (`agentcli`)
 
-**Date**: 2026-10-04 (updated 2026-10-08: session cost)
+**Date**: 2026-10-04 (updated 2026-10-08: session cost; progress summaries and Claude spend, group R)
 **Status**: Draft
 
 Unless stated otherwise:
@@ -8,6 +8,7 @@ Unless stated otherwise:
 - A fake `codex` is first on PATH. It replays a named recorded event stream (sanitized fixtures: `exec-ok`, `review-ok`, `resume-ok`, `error-400`), writes the `-o` file, and exits with a scripted code.
 - `AGENTCLI_PRICES_URL=off`, so no case reaches the network. Price cases point it at a loopback test server that serves a fixture price list.
 - "Real" cases use the installed codex-cli and are the FR57–FR59 smokes.
+- Mod cases run in the plugin test runner. Its kit answers `model.complete` and `session.surfaces` beneath the plugin; `session.surfaces` answers `[]` unless a case says it answers a surface, so a case is headless by default.
 
 ---
 
@@ -51,7 +52,7 @@ Unless stated otherwise:
 - [ ] **material label (FR28):** the fixture output is a findings list with `--material-label findings` → outcome `findings`.
 - [ ] **profiles (FR38):** `--scenario delegation` → plan has `-s workspace-write`, `-c model_reasoning_effort=medium`, `-m gpt-6.1-sol`. `--scenario delegation --effort high` → effort high with `effort_source: flag`.
 - [ ] **unknown scenario (FR38):** `--scenario claude-md-update` → no profile applied, record `scenario: claude-md-update`, sources `provider-default` unless flags are given.
-- [ ] **stats (FR35, US7):** with mixed records → `agentcli stats --all --json` has every key `total, empty, span, by_source, by_source_status, instrumentation, reliability, outcomes, duration_ms, findings, review_findings_proxy, window_days`, plus `by_provider`, `usage_totals`, `usage_by_model`, `skipped`, `unpriced_models`, `missing_prices` and `prices_checked_at`, and no other key.
+- [ ] **stats (FR35, US7):** with mixed records → `agentcli stats --all --json` has every key `total, empty, span, by_source, by_source_status, instrumentation, reliability, outcomes, duration_ms, findings, review_findings_proxy, window_days`, plus `by_provider`, `usage_totals`, `usage_by_model`, `usage_by_provider`, `skipped`, `unpriced_models`, `missing_prices` and `prices_checked_at`, and no other key.
 - [ ] **version (FR10):** `agentcli version --json` → has `version`, `source_commit`, `build_seq` (integer > 0 for CI builds) and `platform`.
 - [ ] **link fresh (FR43, US5):** no launcher present → `agentcli link`.
   - It creates `~/.local/bin/agentcli` (directory created if missing), which executes the resolved install's `bin/agentcli` and carries its `build_seq`.
@@ -86,8 +87,8 @@ Unless stated otherwise:
 
 ## Agent types, progress and agent feedback
 
-- [ ] **agent type answers (FR64, FR67):** in a session with the plugin, after the dispatch skill loads, Claude calls `Agent(subagent_type: "agentcli:second-opinion", prompt: "q")`.
-  - A background agent row appears and streams the run's progress as thinking.
+- [ ] **agent type answers (FR64, FR67):** in a session with the plugin and no summaries (the `summaries` setting off, or a session with no screen, FR86), after the dispatch skill loads, Claude calls `Agent(subagent_type: "agentcli:second-opinion", prompt: "q")`.
+  - A background agent row appears and streams the run's raw progress entries as thinking.
   - The completion notification carries the output and the `[agentcli run … · conversation … · ok]` trailer.
   - No Claude model request is made for the subagent; telemetry has one run with source `agent`.
 - [ ] **gate (FR64):** before the dispatch skill loads, `Agent(subagent_type: "agentcli:adhoc")` is refused as an unknown type; after it loads, the call is accepted. Loading it in another session does not close this one.
@@ -96,7 +97,7 @@ Unless stated otherwise:
 - [ ] **hand-off failure (FR64):** an agentcli failure (exit 3, busy) → the answer starts with `agentcli: the hand-off to the agent failed` and no model request is made.
 - [ ] **progress (FR66):** fake `review-ok` → `agentcli progress <run_id> --json` lists the two commands and the final message in order, `next: 3`; `--from 3` lists none; an unknown run exits 4.
 - [ ] **agent feedback flag (FR68):** `--agent-feedback --session-id s` → `agent_feedback: true` in `request.json` and `status --json`; `AGENTCLI_AGENT_FEEDBACK=1` likewise; with no session id the run exits 0, `agent_feedback: false`, and stderr says it was ignored.
-- [ ] **flagged run shown (FR69):** a hook starts a foreground `exec --agent-feedback` in the session → within one poll a line `agentcli · <scenario> · <source> · <elapsed> · <newest step>` appears above the prompt and follows what the run does; within 5 seconds of the run ending the line is gone. A run started by the agent types, or without the flag, gets no line. No agent row appears, no model request is made, and Claude receives nothing about the run.
+- [ ] **flagged run shown (FR69):** with no summaries (the `summaries` setting off, or a session with no screen), a hook starts a foreground `exec --agent-feedback` in the session → within one poll a line `agentcli · <scenario> · <source> · <elapsed> · <newest step>` appears above the prompt and follows what the run does; within 5 seconds of the run ending the line is gone. A run started by the agent types, or without the flag, gets no line. No agent row appears, no Claude model request is made, and the run's text never enters the conversation with Claude. With summaries active, the line's last part is the label instead (FR91, below).
 - [ ] **model used (FR70):** a run on the provider's default model records `model: null` and `model_used` equal to the model in the provider's session file; `stats --session-id s --json` counts only that session and lists its tokens under `usage_by_model`.
 
 ---
@@ -131,7 +132,7 @@ Expected cached prices (US dollars per million tokens):
   - The server saw one GET with no query string, no `Authorization` header and no cookie.
   - The text form (no `--json`) prints exactly `prices: updated (4 priced, 1 unpriced)`.
 - [ ] **prices shows the cache (FR73):** after the refresh, `agentcli prices --json` → `cached: true` plus the cache's fields. The text form lists each model with its four prices and the unpriced models.
-- [ ] **run cost with estimated writes (FR74, FR75):** one run on `m-sol` with usage `input 1,000,000, cached 800,000, cache_write 0, output 10,000`.
+- [ ] **run cost with estimated writes (FR74, FR75, FR83):** one codex run (a provider that declares implicit caching) on `m-sol` with usage `input 1,000,000, cached 800,000, cache_write 0, output 10,000`.
   - `stats --all --json` gives `usage_by_model.m-sol.cost_usd` `"0.680000"`: 200,000 estimated written tokens at $2.50, 800,000 cached at $0.10 and 10,000 output at $10.
   - `cost_complete` is `true`.
 - [ ] **reported writes win (FR74):** the same run with `cache_write 50,000` → `"0.605000"`: 150,000 ordinary at $2, 800,000 cached, 50,000 written and the output.
@@ -144,7 +145,7 @@ Expected cached prices (US dollars per million tokens):
 - [ ] **stats text (FR75):** for the three runs above:
   - the `tokens:` lines carry no cost key;
   - the output has `cost: $0.95`, plus `cost m-sol: $0.68`, `cost m-old: $0.26` and `cost m-bare: $0.01`.
-- [ ] **status line cost (FR78, US8):** stats answers `cost_usd "0.680000"` with `cost_complete: true` and one job running → the status line is `💸 1 job running · Codex $0.68`. With no job running, it is `💸 Codex $0.68`; with one job running and `cost_usd` null, it is `💸 1 job running`.
+- [ ] **status line cost (FR78, FR92, US8):** stats answers `usage_by_provider.codex` with `cost_usd "0.680000"` and `cost_complete: true`, no `anthropic` key, and one job running → the status line is `💸 1 job running · Codex $0.68`. With no job running, it is `💸 Codex $0.68`; with one job running and `cost_usd` null, it is `💸 1 job running`.
 - [ ] **status line rounding (FR78):**
 
   | `cost_usd` | complete? | Codex part of the status line |
@@ -158,6 +159,8 @@ Expected cached prices (US dollars per million tokens):
   | `"0.004999"` | no | `Codex ≥$0.00` |
   | null | — | nothing for Codex |
 
+  The same table holds for the Claude part, with the label `Claude` (FR78, FR92).
+
 - [ ] **refresh on compaction (FR77, US8):**
   - A `session.compact` with trigger `manual`, then one with `auto`, both with no `agentId` → each hook resolves before its refresh process finishes, and each schedules one `prices refresh --json` with no `--max-age`.
   - The triggers `precompute` and `plugin`, and any compaction with an `agentId`, schedule none.
@@ -165,7 +168,7 @@ Expected cached prices (US dollars per million tokens):
 - [ ] **re-read after a change (FR70, FR77):** a refresh answering `ran: true, changed: true` → the next poll runs `stats` again, even though no run ended.
 - [ ] **live cost of a running run (FR79):** a background run with provider session `T`, kept running by the fake, and the price cache holding `m-sol`. `CODEX_HOME/sessions/…/rollout-…-T.jsonl` has a `turn_context` with model `m-sol`, then `token_count` lines stamped after the run's start; the newest totals are `input 1,000,000, cached 800,000, cache_write 0, output 10,000, reasoning 2,000`. → `progress <run_id> --json` has `usage` with those counts and `cost_usd` `"0.680000"`.
 - [ ] **resumed conversation subtracts what came before (FR79):** the same file also holds a `token_count` stamped before the run's start with totals `input 400,000, cached 300,000, output 5,000`, and the newest totals are `input 1,400,000, cached 1,100,000, output 15,000` → `usage` is `input 1,000,000, cached 800,000, output 10,000` and `cost_usd` is `"0.680000"`.
-- [ ] **band shows the cost (FR80):** progress answers `cost_usd "0.123456"` for a flagged run that has run 95 s and whose newest step is `Reading the diff` → the band line is `agentcli · code-review · hook-stop · 1m 35s · $0.12 · Reading the diff`. With `"0.004000"` it shows `<$0.01`, and with null there is no cost part.
+- [ ] **band shows the cost (FR80):** progress answers `cost_usd "0.123456"` for a flagged run that has run 95 s and whose newest step is `Reading the diff` → the band line is `agentcli · code-review · hook-stop · 1m 35s · $0.12 · Reading the diff`. With `"0.004000"` it shows `<$0.01`, and with null there is no cost part. This is the line with summaries off or before the first label exists; with a label, the last part is the label (FR91, below).
 
 ### Edge cases
 
@@ -230,6 +233,109 @@ Expected cached prices (US dollars per million tokens):
 - [ ] **refresh over a large history (FR72):** with 20,000 telemetry records, `prices refresh` completes. Record its wall time as a baseline.
 - [ ] **long session file (FR79, NFR Performance):** a 50 MB session file whose run events sit in its last 20 KB → `progress --json` returns the right `usage`. Record its wall time as a baseline; the file is read from its end.
 - [ ] **the age gate reads nothing else (FR72, NFR Performance):** with a fresh cache and an unreadable telemetry directory, `prices refresh --max-age 24h` exits 0 with `reason: fresh`.
+
+## Progress summaries and Claude spend
+
+Fixtures for this section:
+- **Price list:** the fixture list of the section above also holds `m-haiku` with `litellm_provider: anthropic`: input `1e-07`, cache read `1e-08`, cache creation `1.25e-07`, output `5e-07`. Its expected cached prices are `{input "0.1", cached_input "0.01", cache_write "0.125", output "0.5"}`. `m-sol` stays an `openai` entry only, and `m-haiku` is in no `openai` entry.
+- **Anthropic usage on stdin:** `U1` is `{"input_tokens":458,"output_tokens":18}`. `U2` is `{"input_tokens":100,"output_tokens":10,"cache_read_input_tokens":400,"cache_creation_input_tokens":200}`. `U3` is `{"input_tokens":1000000,"output_tokens":100000}`. `U4` is `{"input_tokens":100000,"output_tokens":0,"cache_read_input_tokens":800000,"cache_creation_input_tokens":100000}`.
+- **Mixed home:** one codex run on `m-sol` (usage `input 1,000,000, cached 800,000, cache_write 0, output 10,000`, cost `"0.680000"`) and, recorded through `usage add` under the same session, model calls on `m-haiku` with `U3`, `U3` and `U4`.
+- **Mod cases:** the kit answers one surface from `session.surfaces` unless the case says otherwise. `progress` answers scripted entries for the flagged run, and `model.complete` answers scripted replies and records its requests.
+
+Expected costs (US dollars):
+- `U1` on `m-haiku`: `"0.000055"`. `U2`: `"0.000044"`. `U3`: `"0.150000"`. `U4`: `"0.030500"`. The mixed home's model calls together: `"0.330500"`.
+
+### Happy path
+
+- [ ] **usage add records a model call (FR81, FR82):** `printf '%s' "$U1" | agentcli usage add --session-id S --provider anthropic --model m-haiku --source mod-summary --run-id r-x --json` → exit 0 and stdout `{"sdk_status":"ok","exit_code":0,"recorded":true,"call_id":"m-…"}`.
+  - The month file gains one line whose keys are, in this order, `v, kind, call_id, ts, session_id, provider, model, source, run_id, usage`, with `v` 1 and `kind` `model_call`.
+  - `call_id` matches `m-<UTC yyyymmddThhmmssZ>-<8 lowercase hex>` and `ts` is RFC 3339 UTC to the second.
+  - `usage` is `{"input_tokens":458,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":18,"reasoning_output_tokens":0}`, keys in that order.
+- [ ] **usage add text form and no run id (FR82):** the same call without `--json` and without `--run-id` → stdout is the call id alone on one line, and the record has `run_id: null`.
+- [ ] **normalization (FR82):** `U2` → the record's usage is `input_tokens 700, cached_input_tokens 400, cache_write_input_tokens 200, output_tokens 10, reasoning_output_tokens 0`.
+- [ ] **missing keys read 0 (FR82):** stdin `{"input_tokens":5}` → usage `5, 0, 0, 0, 0`. Stdin `{"output_tokens":3}` → usage `0, 0, 0, 3, 0`, recorded.
+- [ ] **run id as given (FR82):** `--run-id` naming no run, or a string that FR9 would refuse (`'a b'`) → exit 0 and the record holds it unchanged.
+- [ ] **model calls stay apart from runs (FR81, FR85):** the mixed home → `runs --json` prints the one run; `status --session-id S --json` lists the one run; `stats --all --json` has `total` 1, `by_provider` holding `codex` only, and no `mod-summary` in `by_source`, `by_source_status` or `instrumentation`. `reliability`, `outcomes`, `duration_ms` and `findings` are equal to those of the same home without the model calls.
+- [ ] **usage_by_provider per provider (FR85):** the mixed home, prices refreshed → `stats --all --json`.
+  - `usage_by_provider.codex` equals `usage_totals` key for key (the home holds codex runs only).
+  - `usage_by_provider.anthropic` is `input_tokens 3,000,000, cached_input_tokens 800,000, cache_write_input_tokens 100,000, output_tokens 200,000, reasoning_output_tokens 0, runs_with_usage 3, cost_usd "0.330500", cost_complete true`.
+- [ ] **usage_totals unchanged (FR85):** the mixed home and the same home without the model calls → `usage_totals` is byte-equal in both, and so are the text `tokens:` lines and the `cost:` line (`cost: $0.68`).
+- [ ] **per-model lines include model calls (FR75, FR85):** the mixed home → `usage_by_model` has an `m-haiku` entry with `cost_usd` `"0.330500"`, and the text output has `cost m-haiku: $0.33` besides `cost m-sol: $0.68`.
+- [ ] **Anthropic usage priced at exactly the input rate (FR83):** `U1` on `m-haiku` → `usage_by_model.m-haiku.cost_usd` is `"0.000055"`, not the `"0.000066"` that estimating 458 written tokens at the cache-write rate would give. A model call of `input_tokens 1,000,000` and no output → `"0.100000"`. This also runs as a module test of the cost function with `ImplicitCacheWrites` false.
+- [ ] **Anthropic cache tokens priced as reported (FR83, FR82):** `U2` → `"0.000044"`: 100 ordinary at $0.10, 400 cached at $0.01, 200 written at $0.125 and 10 output at $0.50. `U4` → `"0.030500"`.
+- [ ] **the gate changes only unflagged usage (FR83):** a module test of the cost function on `m-sol` prices with usage `input 1,000,000, cached 800,000, cache_write 0, output 10,000` → `"0.680000"` with `ImplicitCacheWrites` true and `"0.580000"` with it false (200,000 ordinary at $2, 800,000 cached, 10,000 output). With `cache_write 50,000` both give `"0.605000"`.
+- [ ] **codex numbers unchanged (FR83):** every cost case of the section above (estimated writes `"0.680000"`, reported writes `"0.605000"`, omitted cache prices, exact totals, live cost of a running run) gives the same value as before group R, through `stats` and through `progress`.
+- [ ] **wanted models include model calls (FR72, FR84):** telemetry holding only model calls on `m-haiku` and `unknown`, `FAKECODEX_MODELS` listing `m-sol` → `prices refresh --json` exits 0 with `ran: true`, `priced` `[anthropic/m-haiku, codex/m-sol]` and no `unknown` anywhere.
+  - `prices.json` holds `models.anthropic.m-haiku` as `{input "0.1", cached_input "0.01", cache_write "0.125", output "0.5"}`.
+  - The model calls' models count from the whole telemetry: a call 400 days old makes its model wanted.
+- [ ] **first Claude cost needs a refresh (FR84, FR92):** a model call on `m-haiku` with `U1` and no cache entry for it → `stats` has `usage_by_provider.anthropic.cost_usd` null, `cost_complete` false and `missing_prices` `[m-haiku]`. After the refresh, a call with `U1` costs `"0.000055"` and `missing_prices` is empty.
+- [ ] **stats keys (FR35, FR85):** a home with no records → `usage_by_provider` is `{}`, and the key list is the one of the stats case above.
+- [ ] **first summary on the first entry (FR87, FR88):** a flagged run and a surface; the run's first progress entry arrives → exactly one `model.complete` request with `model: claude-haiku-5-5`, `effort: low`, `maxTokens: 40`, `timeoutMs: 15000`, the system prompt of FRAME and a prompt `Newest activity of the agent, oldest first:` followed by `- <entry>`, with no `Previous label` paragraph.
+- [ ] **cadence: first entry, then every 3 (FR88):** entries 1 to 7 arrive one at a time, each reply settling before the next entry → requests happen at entries 1, 4 and 7 and at no other.
+- [ ] **window and previous label (FR87):** the second request's prompt lists entries 2, 3 and 4 oldest first, one `- <line>` each, then a blank line and `Previous label: <first label> (say something NEW).`.
+- [ ] **window cap and cut (FR87):** 14 new entries arrive between two reads → one request whose prompt lists the 10 newest, oldest first. An entry of 1,000 characters appears in the prompt as a line of 300 characters.
+- [ ] **agent row streams labels (FR91, FR67):** an agentcli subagent with a surface, the reply `Reading workerlog.go` → the row streams thinking `» Reading workerlog.go` on the first slice after the call settles, and no raw entry is streamed. A slice whose call has not settled streams nothing.
+- [ ] **row never waits on a summary (FR91):** the reply is held open for 20 s → the 5-second slices keep their cadence while it is pending, and the 30-second elapsed-time line still appears.
+- [ ] **band shows the label (FR69, FR80, FR91):** a flagged run, 95 s old, cost `"0.123456"`, label `Reading workerlog.go` → the band line is `agentcli · code-review · hook-stop · 1m 35s · $0.12 · Reading workerlog.go`. Before the first label exists, the last part is the raw newest step.
+- [ ] **usage recorded after a reply (FR90):** an answered reply with usage `{input_tokens: 458, output_tokens: 18, …}` → one process runs with argv `[bin, 'usage', 'add', '--session-id', <session id>, '--provider', 'anthropic', '--model', 'claude-haiku-5-5', '--source', 'mod-summary', '--run-id', <run id>, '--json']` and stdin equal to `JSON.stringify(usage)`.
+- [ ] **only billed calls are recorded (FR90):** an `empty-reply` with non-zero usage and an answered reply whose label is rejected (FR89) → both run `usage add`. A completion whose usage is all zero, a rejection of the call, a timeout and a 429 answer → none runs it.
+- [ ] **recording never delays the display (FR90, FR91):** the `usage add` process is held open → the label is shown at once.
+- [ ] **status line with two costs (FR78, FR92, US9):** stats answers `usage_by_provider` with `codex.cost_usd "5.820000"` and `anthropic.cost_usd "0.030000"`, both complete, and one job running → `💸 1 job running · Codex $5.82 | Claude $0.03`. With no job: `💸 Codex $5.82 | Claude $0.03`.
+- [ ] **status line with Claude alone (FR92):** no job, `codex.cost_usd` null, `anthropic.cost_usd "0.030000"` → `💸 Claude $0.03`. With one job running → `💸 1 job running · Claude $0.03`.
+- [ ] **Claude after its first cost (FR92):** `usage_by_provider` holds no `anthropic` key, or `anthropic.cost_usd` null, one job running and Codex `"5.820000"` → `💸 1 job running · Codex $5.82`, with no `|` and no `Claude`.
+- [ ] **older stats answer (FR92):** an answer with no `usage_by_provider` and `usage_totals.cost_usd "0.680000"` → `💸 Codex $0.68`, with no Claude part.
+- [ ] **re-read after a recorded call (FR90, FR92):** a status read, then a `usage add` that exits 0, with no run ending and no price change in between → the next `showStatus` runs `stats` again and shows the new Claude cost. With no further add, it does not.
+- [ ] **counter captured before the read (FR92):** a `usage add` exits 0 while a `stats` read is in flight → after that read, `showStatus` reads `stats` once more.
+
+### Edge cases
+
+- [ ] **all-zero usage records nothing (FR82):** stdin `{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}`, and stdin `{}` → exit 0, `recorded: false, call_id: null` with `--json`, nothing on stdout without it, and the month file unchanged (or still absent).
+- [ ] **repeated call id (FR81):** a month file holding two `model_call` lines with one `call_id` and different usage → `stats` counts the first only. Two `usage add` invocations with the same stdin → two records with different call ids, both counted.
+- [ ] **window filter (FR81):** a model call with `ts` 10 days ago → `stats --days 7` leaves it out, `--days 30` and `--all` count it.
+- [ ] **session filter (FR81):** model calls under sessions `S` and `S2` → `stats --session-id S --all --json` counts the `S` calls only. With a session that has none, `usage_by_provider` has no `anthropic` key.
+- [ ] **provider appears with usage only (FR85):** a window whose runs all have null usage and that holds no model call → `usage_by_provider` is `{}`; a window with only model calls → it holds `anthropic` alone.
+- [ ] **unpriced model calls (FR85, FR75):** model calls on `m-nopr` (in no list) only → `usage_by_provider.anthropic.cost_usd` null and `cost_complete` false; `unpriced_models` lists `m-nopr`. Before any refresh `missing_prices` lists it; after a refresh that finds no price for it, it moves to the cache's `unpriced` and leaves `missing_prices`.
+- [ ] **partly priced provider (FR85):** calls on `m-haiku` (`U3`) and `m-nopr` → `cost_usd "0.150000"`, `cost_complete` false, and `unpriced_models` `[m-nopr]`.
+- [ ] **namespace is fixed (FR84, FR72):** a model call of provider `anthropic` on `m-sol` (an `openai` entry only) → `unpriced` holds `anthropic/m-sol`. A codex run on `m-haiku` (an `anthropic` entry only) → `unpriced` holds `codex/m-haiku`.
+- [ ] **nothing wanted still holds (FR72, FR84):** only model calls on `unknown`, no catalog → `ran: false, reason: nothing_wanted`, with no request and no write.
+- [ ] **no catalog for Claude (FR84):** a refresh wanting `anthropic/m-haiku` runs `codex debug models` once and nothing else for Anthropic; `catalog_error` is empty when the codex catalog reads.
+- [ ] **valid model calls are not skipped (FR33, FR81):** a file with five valid model calls, one unknown-kind, one unknown-version and one garbage line → `skipped` is `{unknown_kind: 1, unknown_version: 1, unparseable: 1}`.
+- [ ] **model call missing a field (FR81):** four `model_call` lines, each without one of `call_id`, `ts`, `provider`, `model` (or with it empty) → `skipped.unparseable` is 4 and `usage_by_provider` holds none of them.
+- [ ] **binary that predates the kind (FR81):** the previous release's binary over a file with model calls → it reports them as `skipped.unknown_kind` and its other output is unchanged. Run by hand with that binary.
+- [ ] **summaries off in the setting (FR86):** `options.summaries` false, with a surface → no `model.complete` request, the row streams raw entries, the band shows the raw newest step, no `usage add` runs. `options.summaries` undefined → summaries are active.
+- [ ] **headless session (FR86):** `session.surfaces` answers `[]` → no request, raw entries in the row and the band. The kit's default is this, so every case that does not opt in is headless.
+- [ ] **surfaces read at each summary (FR86):** a surface present at the first entry and gone at the fourth → the first summary is made and the second is not.
+- [ ] **manifest setting (FR86):** `plugin/.claude-plugin/plugin.json` has `userConfig.summaries` of type boolean, default true, with a title and a description that name `claude-haiku-5-5` and the Anthropic API.
+- [ ] **one in flight per run (FR88):** the first reply held open and 6 more entries arriving → no second request starts while it is pending.
+- [ ] **two in flight per session (FR88):** three flagged runs whose first replies are all held open → at no instant are more than 2 requests pending.
+- [ ] **429 pause (FR88):** a reply that is an `api-error` with status 429 → no request is made for any run for 60 seconds (none at 59 s, even when entries arrive), and a request is made once 60 seconds have passed.
+- [ ] **request deferred under the pause (FR88, FR91):** a label `Reading workerlog.go` is shown on the band, then a 429 answer arrives, then 3 more entries arrive during the pause → no request is made and the band keeps `Reading workerlog.go` (and the row streams nothing new). At 60 s exactly one request is made, whose prompt holds those entries (at most the 10 newest) and the previous label; it is not lost.
+- [ ] **request deferred under the caps (FR88, FR91):** the session already has 2 requests pending and a third run's first entry arrives → the third run's request is not made and its band line shows the raw newest step. When one pending request settles, the third request is made at once with the window as it stands then. For one run whose call is pending while 6 entries arrive, a single request follows its settling, holding the 6 entries (the entries since the last request, at most the 10 newest).
+- [ ] **label cleaning order (FR89):** the reply `Fi\u0007rst` (an interior control character) → the label `First`. A reply that is only control characters or ANSI sequences → rejected as empty. `First\nSecond` is rejected, not joined into `FirstSecond`.
+- [ ] **label cleaning (FR89):** the reply `\u001b[1mReading workerlog.go\u001b[0m` → the label `Reading workerlog.go`. The reply `  Running store tests  \n` → the label `Running store tests`.
+- [ ] **label rejection (FR89):** each of an empty reply, a whitespace-only reply, `First\nSecond`, `First\r\nSecond`, `# Heading`, a reply starting with a backtick, `*bold*`, `- item`, `> quote`, and a reply of 101 characters → a failure: the raw newest entry is shown, and the call is still recorded (FR90). A reply of exactly 100 characters is accepted.
+- [ ] **failure falls back to raw (FR89, FR91):** a rejection of the call, an answer with `isAnswered: false` and a rejected label, each in turn → the row streams the raw newest entry of that window in place of a label, and the band shows it in place of the old label.
+- [ ] **failure logged once per run (FR89):** three failures on one run → one debug log line for that run; a first failure on another run → its own line.
+- [ ] **failed recording (FR90):** `usage add` exits 1 twice → the debug log gets one line and `usageAdds` does not move. After one exit 0 it moves by one, and the next failure logs again.
+
+### Failure and error handling
+
+- [ ] **bad stdin (FR82):** each of stdin that is not JSON, empty stdin, an array, a string and two objects → exit 2 with `sdk_status: usage_error` under `--json`, and nothing written.
+- [ ] **bad values (FR82):** each of `-1`, `1.5`, `"5"`, `null` and `true` as a count → exit 2 and nothing written.
+- [ ] **extra stdin keys ignored (FR82):** stdin `U1` plus `"service_tier":"standard"` and a nested object under another key → exit 0, and the record is identical to the one for `U1` alone.
+- [ ] **ts is the recording time (FR81, FR82):** a `usage add` run between two timestamps taken around it → the record's `ts` lies between them (to the second, UTC), and `--run-id` naming an older run does not change it.
+- [ ] **unknown flag or positional (FR82):** `usage add ... --bogus`, and `usage add ... extra` with valid flags and stdin → exit 2 (`sdk_status: usage_error` under `--json`) and nothing written.
+- [ ] **bad flags (FR82):** `--provider openai` or `--provider codex`, and a missing or empty `--session-id`, `--model` or `--source`, each with valid stdin → exit 2 and nothing written.
+- [ ] **telemetry lock held (FR82):** another process holds the telemetry lock for 10 s → `usage add` exits 70 within the 5-second lock wait and writes nothing. A read-only telemetry directory → exit 70 as well.
+
+### Idempotency
+
+- [ ] **replayed lines (FR81):** the same `model_call` line appended twice → `stats` is equal to a single application.
+- [ ] **reload keeps spend (FR81, FR92):** the mod reloads after three recorded calls → the status line still shows the Claude cost from `stats`, since the calls live in telemetry, not in the mod.
+
+### Performance and limits
+
+- [ ] **telemetry volume with model calls (FR81, FR85):** a month file with 20,000 lines, half of them model calls → `stats --all` and `stats --session-id S --all` complete and report them. Record their wall time as a baseline.
 
 ## Edge Cases
 
@@ -359,4 +465,5 @@ Expected cached prices (US dollars per million tokens):
 - Real-provider cases (FR57–FR59) run on the owner's machine and consume provider usage. They are not part of CI.
 - The mod cases require a Claude Code build with mods enabled. They run through the plugin test runner where possible and manually in a live session for the toast/turn behaviour.
 - A live `prices refresh` against the real price list, and the comparison of `stats` cost with an independent exact recomputation over the owner's telemetry (success metric), run on the owner's machine. They are not part of CI.
+- A real progress summary against the Anthropic API, and the comparison of the Claude cost `stats` reports with the usage the API returned, run on the owner's machine in a session with a screen. They are not part of CI.
 - Fixtures are recorded from codex-cli 0.159.3 and sanitized (fictitious thread/session ids, neutral paths) before they enter the repository (FR44).

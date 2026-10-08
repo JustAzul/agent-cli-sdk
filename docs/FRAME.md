@@ -24,15 +24,15 @@ package boundaries so no slice invents its own version.
 | `internal/provider/codex` | the Codex adapter: plan building and event parsing |
 | `internal/runner` | plan → spawn → stream-parse → finalize, for foreground and worker modes |
 | `internal/store` | home resolution, run directories, conversations, state files, locks |
-| `internal/telemetry` | record types, append, fold, `runs` export, `stats` |
-| `internal/prices` | the price cache, price-list parsing, wanted models, run cost |
+| `internal/telemetry` | record types (`run`, `annotation`, `model_call`), append, fold, `runs` export, `stats` |
+| `internal/prices` | the price cache, price-list parsing, wanted models, run and model-call cost, the implicit-cache flag |
 | `internal/profile` | built-in scenario profiles and precedence resolution |
 | `internal/link` | launcher resolution and writing |
 | `internal/version` | build metadata |
 | `internal/testutil/fakecodex` | the fake provider binary used by tests (a `main` package) |
 | `test/e2e` | black-box tests against the built `agentcli` binary |
 | `tools/import-legacy` | the legacy telemetry import program (FR37) |
-| `plugin/` | plugin content copied into `dist`: skill, mod, commands, hooks |
+| `plugin/` | plugin content copied into `dist`: skill, mod (including the progress summarizer), commands, hooks |
 
 ## Command registration
 
@@ -94,7 +94,27 @@ type ModelCatalog interface {
 type LiveUsageReporter interface {
     LiveUsage(env []string, sessionID string, since time.Time) (u Usage, model string, ok bool, err error)
 }
+
+// Optional: a provider that writes every uncached input token to its prompt
+// cache while reporting no cache writes (implicit prompt caching).
+type ImplicitCaching interface {
+    ImplicitCacheWrites() bool // codex: true
+}
 ```
+
+Cost and implicit caching: `prices.Usage` has a field `ImplicitCacheWrites bool`.
+`RunCost` estimates a zero `CacheWrite` as `max(0, Input − Cached)` only when it
+is true; when it is false the usage is priced exactly as reported. A provider
+that is not registered (`anthropic`) or does not implement `ImplicitCaching` is
+false. Both `RunCost` callers set the field from the record's provider: `stats`
+(runs and model calls) and the live cost of `progress`. A unit test pins that
+Anthropic-shaped usage with no cache is priced at exactly the input rate.
+
+Model-call providers: `anthropic` is the only one. It is not a `Provider` (the
+binary never runs it); `usage add` accepts it, its price namespace is fixed as
+`anthropic` → `anthropic`, and it has no catalog. `prices refresh` wants, per
+provider, the models of that provider's model calls in the whole telemetry as
+well, with empty and `unknown` excluded.
 
 `Request` carries: command (`exec`/`review`/`resume`), prompt presence, cwd,
 model, effort, sandbox, review target, provider session id, passthrough args,
@@ -189,8 +209,29 @@ Lock files: `runs/<run_id>/lock`, `conversations/<conversation_id>.lock`,
 `telemetry/.lock`, and the launcher's lock next to the launcher. All use
 `flock(2)` exclusive locks; descriptors are close-on-exec.
 
-Telemetry records: exactly the FR31 fields for `run`, and
-`{v, kind, run_id, ts, attrs}` for `annotation`, one JSON object per line.
+Telemetry records: exactly the FR31 fields for `run`, `{v, kind, run_id, ts,
+attrs}` for `annotation`, and the fields below for `model_call`, one JSON object
+per line. Field order is the on-disk order:
+
+```json
+{"v":1,"kind":"model_call","call_id":"m-…","ts":"2026-10-08T15:40:02Z","session_id":"<session id>","provider":"anthropic","model":"claude-haiku-5-5","source":"mod-summary","run_id":"r-…","usage":{"input_tokens":458,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":18,"reasoning_output_tokens":0}}
+```
+
+- `call_id` is `m-<UTC yyyymmddThhmmssZ>-<8 lowercase hex>`, minted by `usage add`
+  with the generator of run ids and the prefix `m`.
+- `ts` is RFC 3339 UTC to the second, like a run record's. For a model call it is the time `usage add` records it.
+- `run_id` is the run the call was about, or `null`.
+- `usage` has agentcli's usage shape (the `provider.Usage` JSON tags, in the order
+  above). `input_tokens` is the total input, including the cached and cache-write
+  tokens.
+- Fold: a `model_call` line needs a non-empty `call_id`, `ts`, `provider` and
+  `model`, otherwise it counts as `unparseable`. A repeated `call_id` keeps the
+  first. Model calls are kept apart from runs, in the folded result as
+  `ModelCalls`. They take the window of runs, by `ts`, and the session filter, by
+  `session_id` equality. They appear in no `runs`, `status`, `total`,
+  `by_provider` (run counts), reliability, outcomes, durations, findings or
+  `by_source` output. A binary that predates the kind counts these lines as
+  `skipped.unknown_kind`.
 
 `prices.json` (FR71), written atomically under `prices.lock` by
 `prices refresh`; prices are decimal strings in US dollars per million tokens,
@@ -216,7 +257,66 @@ price):
 
 Decimal strings are the shortest exact form: no exponent, no trailing zeros
 after the point, and no point for whole numbers. `prices.lock` uses `flock(2)`
-like the other locks.
+like the other locks. A model-call provider's models sit under its own key
+(`"anthropic": {"claude-haiku-5-5": {…}}`) once a refresh has priced them.
+
+## Mod: progress summaries
+
+The plugin manifest (`plugin/.claude-plugin/plugin.json`) gains a `userConfig`
+field `summaries`: boolean, default true, with a title and a description saying
+that it summarizes progress with `claude-haiku-5-5` and sends progress text to the
+Anthropic API. `register(on, options)` reads `options.summaries`.
+
+- Active when `options.summaries !== false` and
+  `(await $.session.surfaces()).length > 0`, read at each summary. Otherwise the
+  mod keeps its behaviour from before the summaries.
+- The call is
+  `$.model.complete({ model: 'claude-haiku-5-5', effort: 'low', system: SYSTEM, prompt, maxTokens: 40, timeoutMs: 15000 })`
+  inside try/catch, because a rejection counts as a failure.
+- The window is the run's progress entries since the previous summary request,
+  oldest first, at most the 10 newest. Each entry is a line formatted like
+  `progressLine` and cut to 300 characters.
+- A label is cleaned in this order: trim the reply; reject it if it holds `\n`
+  or `\r`; strip the other control and ANSI characters; then reject it when it is
+  empty, starts with `#`, a backtick, `*`, `-` or `>`, or is over 100 characters.
+  A rejection is a failure.
+- A summary request that is due while the in-flight caps (1 per run, 2 per
+  session) are full or the 429 pause is on is deferred, never dropped. It is made
+  once a slot frees or the pause ends, with the window as it stands then. Until
+  then the band keeps its last label (the raw newest step before the first
+  label) and the row streams nothing new.
+- After every completion whose usage has any non-zero count, the mod runs
+  `[bin, 'usage', 'add', '--session-id', sid, '--provider', 'anthropic', '--model', 'claude-haiku-5-5', '--source', 'mod-summary', '--run-id', runId, '--json']`
+  with stdin `JSON.stringify(usage)`. An exit 0 increments the module counter
+  `usageAdds`, which `showStatus` compares with its value at the last successful
+  `stats` read.
+
+SYSTEM, as measured in the benchmark:
+
+```
+You label what a coding agent is doing right now, for a one-line status row that truncates around 40 characters.
+Describe its most recent action in 3-5 words using present tense (-ing). Name the file, command or function, not the branch.
+Reply with the label only: one line, no quotes, no markdown, no final period.
+
+Good: "Reading workerlog.go"
+Good: "Running store tests"
+Good: "Reviewing the uncommitted diff"
+Bad (past tense): "Read workerlog.go"
+Bad (too vague): "Investigating the issue"
+Bad (too long): "Reviewing the full branch diff and the store package integration"
+```
+
+Prompt:
+
+```
+Newest activity of the agent, oldest first:
+- <entry>
+- <entry>
+
+Previous label: <label> (say something NEW).
+```
+
+The last paragraph is left out when there is no previous label.
 
 ## Test harness
 
@@ -242,6 +342,14 @@ like the other locks.
 - Every e2e sandbox sets `AGENTCLI_PRICES_URL=off` unless the test sets it to the
   URL of an `httptest` server on 127.0.0.1 that serves a fixture price list
   (`testdata/prices/`).
+- A model call is recorded in an e2e test by running `agentcli usage add` with
+  usage on stdin; no fake binary is involved.
+- The plugin test kit (`plugin/tests/kit.ts`) answers two seams beneath the
+  plugin: `model.complete` (it records the requests it receives and answers
+  scripted replies) and `session.surfaces` (it answers `[]` by default, so the
+  tests that existed before the summaries stay headless and unchanged; a test
+  that wants summaries opts in with a surface). A test sets the plugin options
+  (`summaries`) that `register(on, options)` receives.
 - Live-usage tests set `CODEX_HOME` to a temp directory and write a Codex session
   file there (`sessions/<y>/<m>/<d>/rollout-<time>-<thread id>.jsonl`) holding
   `turn_context` and `token_count` lines; the fake provider writes none itself.
@@ -330,6 +438,41 @@ like the other locks.
   terminal state, or a cancel request on a queued run, ends the worker without
   spawning the provider and without touching the state. An admission whose
   worker left for that reason ends the run `cancelled`, not `failed`.
+- Usage add: `agentcli usage add --session-id <id> --provider anthropic --model
+  <model> --source <source> [--run-id <run_id>] [--json]` records one model call.
+  - Stdin is one JSON object, Anthropic's usage exactly as `$.model.complete`
+    returns it: `{"input_tokens":N,"output_tokens":N,"cache_read_input_tokens":N,"cache_creation_input_tokens":N}`.
+    A missing key reads as 0, and any other key is ignored (the reply's usage
+    object may gain fields). A value that is not a non-negative integer, or stdin
+    that is not one JSON object, exits 2 before anything is written.
+  - `--provider` must be a model-call provider; `anthropic` is the only one, and
+    anything else exits 2. `--session-id`, `--model` and `--source` are required
+    and non-empty (exit 2). `--run-id` is recorded as given. An unknown flag or a
+    positional argument exits 2, like every other command.
+  - The record's `ts` is the time the command records the call, UTC to the second.
+  - Normalization, in Go: `input_tokens` = input + cache_read + cache_creation;
+    `cached_input_tokens` = cache_read; `cache_write_input_tokens` =
+    cache_creation; `output_tokens` = output; `reasoning_output_tokens` = 0.
+  - When all four counts are 0 nothing is written, and the command exits 0 with
+    `recorded: false`.
+  - With `--json`, stdout is one object
+    `{"sdk_status":"ok","exit_code":0,"recorded":true,"call_id":"m-…"}`
+    (`"recorded":false,"call_id":null` when nothing was written); a usage error
+    prints the usual `{"sdk_status":"usage_error","exit_code":2,"error":"…"}`.
+    Without `--json`, stdout is the call id on one line, or nothing.
+  - A telemetry lock or write failure exits 70 (`sdk_status` `internal_error`), as
+    `annotate` does: the model call is the command's whole job.
+- Stats: `usage_by_provider` is an object keyed by provider. Each value has
+  exactly the shape of `usage_totals`: `input_tokens`, `cached_input_tokens`,
+  `cache_write_input_tokens`, `output_tokens`, `reasoning_output_tokens`,
+  `runs_with_usage`, `cost_usd`, `cost_complete`. For a model-call provider
+  `runs_with_usage` counts its model calls with usage. A provider appears when it
+  has at least one run or model call with usage in the window and session
+  filter. Per provider, `cost_usd` is null exactly when none of its records with
+  usage has a price. `usage_totals`, the text `tokens:` lines and the text
+  `cost:` line stay runs-only. `usage_by_model`, `unpriced_models` and
+  `missing_prices` include the models of model calls, and so do the per-model
+  `cost <model>:` text lines.
 
 ## Rules for every slice
 
