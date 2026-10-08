@@ -317,6 +317,9 @@ Expected costs (US dollars):
 - [ ] **failure falls back to raw (FR89, FR91):** a rejection of the call, an answer with `isAnswered: false` and a rejected label, each in turn → the row streams the raw newest entry of that window in place of a label, and the band shows it in place of the old label.
 - [ ] **failure logged once per run (FR89):** three failures on one run → one debug log line for that run; a first failure on another run → its own line.
 - [ ] **failed recording (FR90):** `usage add` exits 1 twice → the debug log gets one line and `usageAdds` does not move. After one exit 0 it moves by one, and the next failure logs again.
+- [ ] **failed recording is kept and retried on each poll (FR90, FR92):** `usage add` exits 70 → the next poll runs it again with the same argv and the same stdin, and every poll after that until it exits 0. The poll that sees the exit 0 increments `usageAdds` and runs `stats` again before the status line is drawn; later polls do not run `usage add` for it.
+- [ ] **retries stop at the first failure (FR90):** three failed recordings, oldest first, and `usage add` still failing → a poll runs only the oldest. Once it exits 0, one poll records all three in their original order.
+- [ ] **at most 100 pending, oldest dropped (FR90):** 100 recordings fail → no toast. The 101st failure drops the oldest (a debug log line) and shows the toast `agentcli: some summary costs could not be recorded; the Claude cost is a lower bound`; a 102nd drops the next oldest, logs it, and shows no second toast. When `usage add` then exits 0, one poll records the remaining 100, oldest first, and the two dropped are never run again.
 
 ### Failure and error handling
 

@@ -195,7 +195,8 @@ test('a recording that failed does not make the next poll read the costs', async
 
   await w.clock.advance(POLL_MS * 3)
 
-  expect(usageRuns(w)).toHaveLength(1)
+  // The one call is tried again on each poll, and never recorded.
+  expect(new Set(usageRuns(w).map((r) => r.stdin)).size).toBe(1)
   expect(statsReads(w)).toBe(0)
 })
 
@@ -248,4 +249,126 @@ test('a read of the costs that fails leaves the recorded call due', async ($, on
 
   expect(statsReads(w)).toBe(2)
   expect(w.statuses.at(-1)).toBe('💸 Codex $5.82 | Claude $0.03')
+})
+
+// A recording that fails is kept and tried again on each poll.
+
+const BUSY = { exitCode: 70, stdout: '', stderr: 'busy\n' }
+const DROP_TOAST = 'agentcli: some summary costs could not be recorded; the Claude cost is a lower bound'
+const MAX_PENDING = 100
+
+// billedBy answers each summary call with its own usage, so a recording is told
+// from the others by its standard input.
+function billedBy(w: ReturnType<typeof world>) {
+  let calls = 0
+  w.respondModel = () => ({ isAnswered: true, text: 'Reading auth.go', usage: { ...NO_USAGE, input_tokens: ++calls, output_tokens: 1 } })
+}
+
+const stdinOf = (calls: number) => JSON.stringify({ ...NO_USAGE, input_tokens: calls, output_tokens: 1 })
+const stdins = (w: ReturnType<typeof world>) => usageRuns(w).map((r) => r.stdin)
+const unique = <T>(items: T[]) => [...new Set(items)]
+
+test('a recording that failed is tried again on the next poll with the same standard input', async ($, on) => {
+  const w = world(on)
+  billedBy(w)
+  let isBusy = true
+  flagged(w, () => (isBusy ? BUSY : ok('')))
+  await $.session.start(START)
+
+  await w.clock.advance(POLL_MS)
+  expect(unique(stdins(w))).toEqual([stdinOf(1)])
+  expect(recordFailures(w)).toHaveLength(1)
+
+  isBusy = false
+  const failed = usageRuns(w).length
+  await w.clock.advance(POLL_MS)
+
+  expect(usageRuns(w).length).toBe(failed + 1)
+  expect(usageRuns(w).at(-1)!.argv).toEqual(usageRuns(w)[0]!.argv)
+  expect(usageRuns(w).at(-1)!.stdin).toBe(stdinOf(1))
+
+  // Recorded now: it is not tried again.
+  await w.clock.advance(POLL_MS * 3)
+  expect(usageRuns(w).length).toBe(failed + 1)
+})
+
+test('a recording that succeeds on a retry makes the same poll read the costs again', async ($, on) => {
+  const w = world(on)
+  billedBy(w)
+  let isBusy = true
+  flagged(w, () => (isBusy ? BUSY : ok('')))
+  await $.session.start(START)
+
+  await w.clock.advance(POLL_MS)
+  expect(statsReads(w)).toBe(0)
+
+  isBusy = false
+  await w.clock.advance(POLL_MS)
+
+  expect(statsReads(w)).toBe(1)
+  expect(w.statuses.at(-1)).toBe('💸 Codex $5.82 | Claude $0.03')
+})
+
+test('the retries stop at the first recording that fails again, and go on in order once it is recorded', async ($, on) => {
+  const w = world(on)
+  billedBy(w)
+  let isBusy = true
+  const entries = flagged(w, () => (isBusy ? BUSY : ok('')))
+  await $.session.start(START)
+
+  // The first poll starts the band; its refresh summarizes the first entry.
+  await w.clock.advance(POLL_MS)
+  for (let i = 0; i < 2; i += 1) {
+    entries.push(entry('a'), entry('b'), entry('c'))
+    await w.clock.advance(BAND_REFRESH_MS)
+  }
+  const kept = unique(stdins(w))
+  expect(kept).toEqual([stdinOf(1), stdinOf(2), stdinOf(3)])
+
+  // Nothing new to summarize: one poll tries the oldest only, which fails again.
+  const before = usageRuns(w).length
+  await w.clock.advance(POLL_MS)
+  const retried = usageRuns(w).slice(before)
+  expect(retried.map((r) => r.stdin)).toEqual([kept[0]])
+
+  isBusy = false
+  const failed = usageRuns(w).length
+  await w.clock.advance(POLL_MS)
+  expect(usageRuns(w).slice(failed).map((r) => r.stdin)).toEqual(kept)
+})
+
+test('the 101st failed recording drops the oldest, with one toast per load', async ($, on) => {
+  const w = world(on)
+  billedBy(w)
+  let isBusy = true
+  const entries = flagged(w, () => (isBusy ? BUSY : ok('')))
+  await $.session.start(START)
+
+  // The first poll starts the band; its refresh summarizes the first entry.
+  await w.clock.advance(POLL_MS)
+  for (let kept = 1; kept < MAX_PENDING; kept += 1) {
+    entries.push(entry('a'), entry('b'), entry('c'))
+    await w.clock.advance(BAND_REFRESH_MS)
+  }
+  expect(unique(stdins(w))).toHaveLength(MAX_PENDING)
+  expect(w.toasts).toEqual([])
+
+  entries.push(entry('a'), entry('b'), entry('c'))
+  await w.clock.advance(BAND_REFRESH_MS)
+  expect(unique(stdins(w))).toHaveLength(MAX_PENDING + 1)
+  expect(w.toasts).toEqual([DROP_TOAST])
+  expect(w.logs.filter((l) => l.includes('dropped'))).toHaveLength(1)
+
+  // A second drop is a loss too, and is logged, but shows no second toast.
+  entries.push(entry('a'), entry('b'), entry('c'))
+  await w.clock.advance(BAND_REFRESH_MS)
+  expect(w.toasts).toEqual([DROP_TOAST])
+  expect(w.logs.filter((l) => l.includes('dropped'))).toHaveLength(2)
+
+  // The two oldest are gone for good; the other hundred are recorded in order.
+  isBusy = false
+  const failed = usageRuns(w).length
+  await w.clock.advance(POLL_MS)
+  const recorded = usageRuns(w).slice(failed).map((r) => r.stdin)
+  expect(recorded).toEqual(Array.from({ length: MAX_PENDING }, (_, i) => stdinOf(i + 3)))
 })

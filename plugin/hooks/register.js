@@ -123,6 +123,13 @@ let isPricesChanged = false
 let usageAdds = 0
 let readUsageAdds = 0
 let isRecordFailureLogged = false
+// The recordings that failed, oldest first, each tried again on every poll. The
+// list holds at most MAX_PENDING_RECORDINGS; a recording that finds it full pushes
+// out the oldest, which is lost for good and shown in a toast once per load.
+const MAX_PENDING_RECORDINGS = 100
+const LOST_RECORDINGS_TOAST = 'agentcli: some summary costs could not be recorded; the Claude cost is a lower bound'
+const pendingRecordings = []
+let isLossToastShown = false
 const pricedModels = new Set()
 // Runs whose progress could not be read, each logged once.
 const loggedProgressFailures = new Set()
@@ -137,6 +144,8 @@ let conversationWrites = Promise.resolve()
 
 export function register(on, options) {
   summaries = createSummarizer(options ?? {})
+  pendingRecordings.length = 0
+  isLossToastShown = false
   on('session.start', async ($, e, next) => {
     await registerTools($)
     await registerAgentTypes($)
@@ -345,6 +354,8 @@ async function checkJobs($) {
   setFollowed(followedRuns(followed, flaggedRuns(reply.stdout)))
   hasPolledRuns = true
   await refreshBand($)
+  // Before the costs are read, so a recording that lands now is counted by them.
+  await retryRecordings($)
   await showStatus($, bin, sessionId, runningCount(jobs), terminalRunIds(reply.stdout))
 
   let notified = readNotified(await $.store.get(NOTIFIED_KEY))
@@ -575,24 +586,62 @@ function summaryPorts($) {
 }
 
 // recordUsage hands a billed summary call to `usage add`. It never throws; a
-// failure is logged once until one recording succeeds.
+// recording that fails is kept to be tried again, and its failure is logged once
+// until one recording succeeds.
 async function recordUsage($, usage, runId) {
-  let failure
+  const failure = await addUsage($, usage, runId)
+  if (failure === null) return
+  keepRecording($, { usage, runId })
+  logRecordFailure($, failure)
+}
+
+// addUsage runs `usage add` once and returns null when it recorded the call, else
+// why it did not.
+async function addUsage($, usage, runId) {
   try {
     const argv = usageAddCommand(shimPath($.plugin.root), await $.session.id(), runId)
     const reply = await $.process.run(argv, { stdin: JSON.stringify(usage) })
-    if (reply.exitCode === 0) {
-      isRecordFailureLogged = false
-      usageAdds += 1
-      return
-    }
-    failure = failureText(reply)
+    if (reply.exitCode !== 0) return failureText(reply)
+    isRecordFailureLogged = false
+    usageAdds += 1
+    return null
   } catch (error) {
-    failure = messageOf(error)
+    return messageOf(error)
   }
-  if (!isRecordFailureLogged) {
-    isRecordFailureLogged = true
-    $.ui.log('could not record the usage of a summary call: ' + failure, { to: 'debug' })
+}
+
+function logRecordFailure($, failure) {
+  if (isRecordFailureLogged) return
+  isRecordFailureLogged = true
+  $.ui.log('could not record the usage of a summary call: ' + failure, { to: 'debug' })
+}
+
+// keepRecording adds a failed recording at the end of the list, pushing out the
+// oldest when the list is full.
+function keepRecording($, recording) {
+  if (pendingRecordings.length >= MAX_PENDING_RECORDINGS) {
+    pendingRecordings.shift()
+    reportLostRecording($)
+  }
+  pendingRecordings.push(recording)
+}
+
+function reportLostRecording($) {
+  $.ui.log('dropped the oldest pending summary recording: the list is full', { to: 'debug' })
+  if (isLossToastShown) return
+  isLossToastShown = true
+  $.ui.toast(LOST_RECORDINGS_TOAST)
+}
+
+// retryRecordings tries the pending recordings again, oldest first, and stops at
+// the first that fails again, which stays first.
+async function retryRecordings($) {
+  for (const recording of [...pendingRecordings]) {
+    const failure = await addUsage($, recording.usage, recording.runId)
+    if (failure !== null) return logRecordFailure($, failure)
+    // A recording kept meanwhile may have pushed this one out of the list.
+    const index = pendingRecordings.indexOf(recording)
+    if (index !== -1) pendingRecordings.splice(index, 1)
   }
 }
 
