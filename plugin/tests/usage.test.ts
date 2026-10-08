@@ -254,7 +254,7 @@ test('a read of the costs that fails leaves the recorded call due', async ($, on
 // A recording that fails is kept and tried again on each poll.
 
 const BUSY = { exitCode: 70, stdout: '', stderr: 'busy\n' }
-const DROP_TOAST = 'agentcli: some summary costs could not be recorded; the Claude cost is a lower bound'
+const DROP_TOAST = 'some summary costs could not be recorded; the Claude cost is a lower bound'
 const MAX_PENDING = 100
 
 // billedBy answers each summary call with its own usage, so a recording is told

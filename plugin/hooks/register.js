@@ -127,7 +127,7 @@ let isRecordFailureLogged = false
 // list holds at most MAX_PENDING_RECORDINGS; a recording that finds it full pushes
 // out the oldest, which is lost for good and shown in a toast once per load.
 const MAX_PENDING_RECORDINGS = 100
-const LOST_RECORDINGS_TOAST = 'agentcli: some summary costs could not be recorded; the Claude cost is a lower bound'
+const LOST_RECORDINGS_TOAST = 'some summary costs could not be recorded; the Claude cost is a lower bound'
 const pendingRecordings = []
 let isLossToastShown = false
 const pricedModels = new Set()
