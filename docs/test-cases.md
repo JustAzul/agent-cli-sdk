@@ -391,6 +391,7 @@ Fixtures for this section:
 - [ ] **none basis (FR94):** no run of the scenario, asked from `D` → exit 0 and stdout exactly `{"sdk_status":"ok","exit_code":0,"scenario":"code-review","repo":"D","basis":"none","eta_ms":null,"samples":0,"repos":0}` and a newline.
 - [ ] **not a repository, directory gone (FR94):** a run of 1000 ms in the plain directory and one of 3000 ms in the gone directory → asked from each, `repo` is that directory string itself, `basis: repo`, `eta_ms` 1000 and 3000, `samples` 1, `repos` 1.
 - [ ] **git cannot run (FR94):** no `git` on `PATH`; a run of 50000 ms in the repository's subdirectory `pkg`, asked from the repository → each directory is its own key: `repo` is the repository directory, `basis: global`, `eta_ms` 50000, `samples` 1, `repos` 1.
+- [ ] **symbolic links resolved (FR94):** a directory `D` and a link `L` to it; a run of 20000 ms recorded in `D` and one of 40000 ms recorded in `L` → asked from `D` and from `L`, each gives `repo` `D` (resolved), `basis: repo`, `eta_ms` 30000, `samples` 2, `repos` 1.
 - [ ] **relative --cwd (FR94):** runs of 20000 and 40000 ms in `<P>/project`, then `eta --scenario code-review --cwd project --json` run from `<P>` → `repo` `<P>/project`, `basis: repo`, `eta_ms` 30000, `samples` 2.
 - [ ] **each directory resolved once (FR94):** module case: two runs in `/work/a` and one in `/work/b`, asked from `/work/a` → the key function is called once for each directory.
 - [ ] **half away from zero (FR94):** module case: runs of 1000 and 1001 ms → `eta_ms` 1001.

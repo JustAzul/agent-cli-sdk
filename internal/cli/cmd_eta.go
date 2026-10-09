@@ -88,8 +88,13 @@ func runETA(ctx *Context, args []string) int {
 
 // gitRepoKey names the repository a directory belongs to by its common git
 // directory, which a work tree and its linked worktrees share. A directory git
-// cannot resolve, for any reason, is its own key.
+// cannot resolve, for any reason, is its own key. Symbolic links in a directory
+// that still exists are resolved first, so two spellings of one directory
+// (/tmp and /private/tmp on macOS) share a key.
 func gitRepoKey(dir string) string {
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
 	out, err := exec.Command("git", "-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
 	if key := strings.TrimSpace(string(out)); err == nil && key != "" {
 		return key

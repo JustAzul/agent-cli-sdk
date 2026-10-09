@@ -81,12 +81,29 @@ func TestETARepoKeyFallsBackToTheDirectoryItself(t *testing.T) {
 	seedETA(t, s, etaRun(t, "e1", plain, 1000), etaRun(t, "e2", gone, 3000))
 
 	for name, c := range map[string]struct {
-		dir string
-		ms  float64
-	}{"not a repository": {plain, 1000}, "directory gone": {gone, 3000}} {
+		dir, key string
+		ms       float64
+	}{"not a repository": {plain, realPath(t, plain), 1000}, "directory gone": {gone, gone, 3000}} {
 		j := s.run("eta", "--scenario", "code-review", "--cwd", c.dir, "--json").json(t)
-		if j["repo"] != c.dir || j["basis"] != "repo" || j["eta_ms"] != c.ms || j["samples"] != float64(1) || j["repos"] != float64(1) {
-			t.Errorf("%s: got %v, want repo %s, basis repo, eta_ms %v, samples 1, repos 1", name, j, c.dir, c.ms)
+		if j["repo"] != c.key || j["basis"] != "repo" || j["eta_ms"] != c.ms || j["samples"] != float64(1) || j["repos"] != float64(1) {
+			t.Errorf("%s: got %v, want repo %s, basis repo, eta_ms %v, samples 1, repos 1", name, j, c.key, c.ms)
+		}
+	}
+}
+
+func TestETARepoKeyResolvesSymbolicLinks(t *testing.T) {
+	s := newSandbox(t)
+	dir := realPath(t, t.TempDir())
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatal(err)
+	}
+	seedETA(t, s, etaRun(t, "e1", dir, 20000), etaRun(t, "e2", link, 40000))
+
+	for name, from := range map[string]string{"the directory": dir, "a link to it": link} {
+		j := s.run("eta", "--scenario", "code-review", "--cwd", from, "--json").json(t)
+		if j["repo"] != dir || j["basis"] != "repo" || j["eta_ms"] != float64(30000) || j["samples"] != float64(2) || j["repos"] != float64(1) {
+			t.Errorf("from %s: got %v, want repo %s, basis repo, eta_ms 30000, samples 2, repos 1", name, j, dir)
 		}
 	}
 }
@@ -195,8 +212,8 @@ func TestETACwdDefaultsToTheWorkingDirectory(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &j); err != nil {
 		t.Fatalf("stdout is not one JSON object: %v\n%q", err, out.String())
 	}
-	if j["repo"] != here || j["basis"] != "repo" || j["eta_ms"] != float64(30000) {
-		t.Errorf("got %v, want repo %s, basis repo, eta_ms 30000", j, here)
+	if want := realPath(t, here); j["repo"] != want || j["basis"] != "repo" || j["eta_ms"] != float64(30000) {
+		t.Errorf("got %v, want repo %s, basis repo, eta_ms 30000", j, want)
 	}
 }
 
@@ -252,7 +269,7 @@ func TestETARepoKeyFallsBackToTheDirectoryWhenGitCannotRun(t *testing.T) {
 	j := s.run("eta", "--scenario", "code-review", "--cwd", repo, "--json").json(t)
 
 	// With git on PATH both directories share one key; without it each is its own.
-	if j["repo"] != repo || j["basis"] != "global" || j["eta_ms"] != float64(50000) || j["samples"] != float64(1) || j["repos"] != float64(1) {
-		t.Errorf("got %v, want repo %s, basis global, eta_ms 50000, samples 1, repos 1", j, repo)
+	if want := realPath(t, repo); j["repo"] != want || j["basis"] != "global" || j["eta_ms"] != float64(50000) || j["samples"] != float64(1) || j["repos"] != float64(1) {
+		t.Errorf("got %v, want repo %s, basis global, eta_ms 50000, samples 1, repos 1", j, want)
 	}
 }

@@ -280,12 +280,15 @@ stub that names which directories share a repository.
   `duration_ms` does not read as a number counts in neither `samples` nor
   `repos`. Skipped
   telemetry lines are not reported (`stats` reports them).
-- Repo key of a directory: the trimmed stdout of
+- Repo key of a directory: its symbolic links are resolved first
+  (`filepath.EvalSymlinks`; a directory that is gone stays as written), so two
+  spellings of one directory, such as `/tmp` and `/private/tmp` on macOS, share
+  a key. The key is then the trimmed stdout of
   `git -C <dir> rev-parse --path-format=absolute --git-common-dir`, which a work
   tree, its subdirectories and its linked worktrees share. When that fails for
   any reason (the directory is gone, it is not a repository, git is missing, a
-  non-zero exit) or prints nothing, the key is the directory string itself. Each
-  distinct directory, `--cwd` included, is resolved once per invocation.
+  non-zero exit) or prints nothing, the key is the resolved directory itself.
+  Each distinct directory, `--cwd` included, is resolved once per invocation.
 - The target key is the repo key of `--cwd`.
   - Some sample has the target key → `basis: "repo"`: `eta_ms` is the mean
     `duration_ms` of those samples, `samples` their count, `repos` 1.
