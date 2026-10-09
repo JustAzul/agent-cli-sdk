@@ -142,7 +142,7 @@ func TestETAJSONHasTheDocumentedKeysAndValues(t *testing.T) {
 
 	r := s.run("eta", "--scenario", "code-review", "--cwd", dir, "--json")
 
-	want := fmt.Sprintf(`{"sdk_status":"ok","exit_code":0,"scenario":"code-review","repo":%q,"basis":"repo","eta_ms":156000,"samples":12,"repos":1}`+"\n", dir)
+	want := fmt.Sprintf(`{"sdk_status":"ok","exit_code":0,"scenario":"code-review","repo":%q,"basis":"repo","eta_ms":156000,"samples":12,"repos":1}`+"\n", realPath(t, dir))
 	if r.code != 0 || r.stdout != want {
 		t.Errorf("exit %d, stdout %q\nwant      %q", r.code, r.stdout, want)
 	}
@@ -154,7 +154,7 @@ func TestETAJSONWithoutHistoryHasANullEstimate(t *testing.T) {
 
 	r := s.run("eta", "--scenario", "code-review", "--cwd", dir, "--json")
 
-	want := fmt.Sprintf(`{"sdk_status":"ok","exit_code":0,"scenario":"code-review","repo":%q,"basis":"none","eta_ms":null,"samples":0,"repos":0}`+"\n", dir)
+	want := fmt.Sprintf(`{"sdk_status":"ok","exit_code":0,"scenario":"code-review","repo":%q,"basis":"none","eta_ms":null,"samples":0,"repos":0}`+"\n", realPath(t, dir))
 	if r.code != 0 || r.stdout != want {
 		t.Errorf("exit %d, stdout %q\nwant      %q", r.code, r.stdout, want)
 	}
