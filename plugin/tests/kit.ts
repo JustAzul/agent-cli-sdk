@@ -7,7 +7,7 @@ export const SESSION = 'sess-1'
 export const isShim = (p: string) => p.startsWith('/') && p.endsWith('/bin/agentcli')
 export const TOOL = (name: string) => `mcp__agentcli__${name}`
 
-export type Run = { argv: string[]; stdin?: string; cwd?: string }
+export type Run = { argv: string[]; stdin?: string; cwd?: string; timeoutMs?: number }
 export type Reply = { exitCode: number; stdout: string; stderr: string }
 export type Responder = (argv: string[], init: any) => Reply | Promise<Reply>
 
@@ -57,6 +57,10 @@ export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
     runs: [] as Run[],
     toasts: [] as string[],
     logs: [] as string[],
+    // The texts sent to the debug log alone.
+    debugLogs: [] as string[],
+    // Every event name the plugin asked to draw again.
+    invalidations: [] as string[],
     statuses: [] as (string | undefined)[],
     submits: [] as string[],
     tools: [] as any[],
@@ -105,6 +109,7 @@ export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
   })
   on('ui.log', (_$: any, e: any) => {
     w.logs.push(e.text)
+    if (e.to === 'debug') w.debugLogs.push(e.text)
     return { value: undefined }
   })
   on('ui.status', (_$: any, e: any) => {
@@ -127,7 +132,7 @@ export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
   })
   on('store.keys', () => ({ value: [...w.store.keys()] }))
   on('process.run', async (_$: any, e: any) => {
-    w.runs.push({ argv: [...e.argv], stdin: e.init?.stdin, cwd: e.init?.cwd })
+    w.runs.push({ argv: [...e.argv], stdin: e.init?.stdin, cwd: e.init?.cwd, timeoutMs: e.init?.timeoutMs })
     const answer = isPrices(e.argv) ? w.respondPrices : w.respond
     return { value: await answer([...e.argv], e.init ?? {}) }
   })
@@ -164,6 +169,15 @@ export function world(on: any, opts: { store?: Record<string, unknown> } = {}) {
   })
   // Anything the mod does not answer itself falls through to here.
   on('tool.call', () => ({ result: 'unanswered' }))
+  on('ui.invalidate', (_$: any, e: any) => {
+    w.invalidations.push(e.event)
+    return { value: undefined }
+  })
+  // The engine's own spinner: the message while one overrides the word.
+  on('ui.render', { component: 'Spinner' }, ($: any, e: any) => {
+    const { Text } = $.ui.resolve(e)
+    return h(Text, {}, e.props.message ?? e.props.word)
+  })
   // The engine's own band above the prompt: a survey while one holds it,
   // otherwise empty.
   on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => {
@@ -188,5 +202,8 @@ export async function step($: any, agentId?: string) {
   const text = chunks.filter((c) => c.kind === 'text').map((c) => c.text).join('')
   return { chunks, result: next.value, text }
 }
+
+// The toasts that are not spawn notices.
+export const withoutSpawnNotices = (toasts: string[]) => toasts.filter((text) => !text.startsWith('agentcli · spawned '))
 
 export const POLL_MS = 15000

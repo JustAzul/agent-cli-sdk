@@ -56,10 +56,12 @@ export function bandLine(run, now) {
   return parts.filter((part) => part !== '').join(' · ')
 }
 
-// labelled is a run as the band shows it once a summary has settled: its label
-// in place of the newest raw step. Without one the run is as it was.
+// labelled is a run as the band shows it while summaries are active: its label
+// in place of the newest raw step, or no step before the first label. A label
+// of undefined means summaries are not active, and the run is as it was.
 export function labelled(run, label) {
-  return typeof label === 'string' ? { ...run, line: label } : run
+  if (label === undefined) return run
+  return { ...run, line: label ?? '' }
 }
 
 // withProgress applies what a refresh read to the runs the band follows now:

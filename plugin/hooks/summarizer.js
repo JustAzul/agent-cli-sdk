@@ -18,7 +18,7 @@ import {
 // createSummarizer is one load's summaries; `options` is the plugin's config.
 // What it needs of the engine arrives as `ports`, because a hooks module may
 // not hand `$` to another module: surfaces(), now(), complete(request),
-// record(usage, runId) and log(text).
+// record(usage, runId), log(text) and labelSettled(runId).
 export function createSummarizer(options) {
   const runs = new Map()
   let inFlight = 0
@@ -71,30 +71,29 @@ export function createSummarizer(options) {
 
     if (outcome.label !== undefined) {
       run.label = outcome.label
-      run.shown = { text: outcome.label, isLabel: true }
-    } else {
-      run.shown = { text: sent[sent.length - 1], isLabel: false }
-      if (!run.isFailureLogged) {
-        run.isFailureLogged = true
-        ports.log('could not summarize the progress of run ' + runId + ': ' + outcome.failure)
-      }
+      run.isUnread = true
+      ports.labelSettled(runId)
+      return
     }
-    run.isUnread = true
+
+    if (run.isFailureLogged) return
+    run.isFailureLogged = true
+    ports.log('could not summarize the progress of run ' + runId + ': ' + outcome.failure)
   }
 
   // take is what the agent row streams next: the label that settled since the
-  // last call, or the newest raw entry of the sent whose request failed.
+  // last call.
   function take(runId) {
     const run = runs.get(runId)
     if (run === undefined || !run.isUnread) return []
     run.isUnread = false
-    return [run.shown.isLabel ? labelLine(run.shown.text) : run.shown.text]
+    return [labelLine(run.label)]
   }
 
   // shown is what the band shows of a run in place of its newest raw step, or
-  // null until a request has settled.
+  // null until a label has settled.
   function shown(runId) {
-    return runs.get(runId)?.shown?.text ?? null
+    return runs.get(runId)?.label ?? null
   }
 
   function forget(runId) {

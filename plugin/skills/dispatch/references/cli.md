@@ -82,6 +82,12 @@ provider stderr; read it first when a run errors), `request.json`,
   outcomes, durations, reliability, findings summary, tokens in total and per
   model (`usage_by_model`), and their cost in US dollars at API list prices
   (`cost_usd`; `cost_complete` is false when some model has no price).
+- `agentcli eta --scenario NAME [--cwd DIR] [--json]`: how long a run of the
+  scenario usually takes, the mean duration of its runs in the same git
+  repository, else the mean of each repository's mean, as one line
+  (`ETA ~2m 36s (repo average, 12 runs)`); `--json` returns `sdk_status`,
+  `exit_code`, `scenario`, `repo`, `basis` (`repo`, `global` or `none`),
+  `eta_ms` (null with no history), `samples` and `repos`.
 - `agentcli prices [--json]` / `agentcli prices refresh [--max-age 24h] [--json]`:
   the cached model prices the cost uses, and refreshing them from the public
   price list (exit 7 when it cannot be read; the cache is kept).

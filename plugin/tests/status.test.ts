@@ -37,13 +37,15 @@ test('the poll lists this session only, every fifteen seconds', async ($, on) =>
   w.respond = () => listing()
   await $.session.start(START)
 
+  // The spawn reads are the same listing, five seconds apart: two before the
+  // poll's period ends, and with it a third beside the poll's own.
   await w.clock.advance(POLL_MS - 1)
-  expect(otherRuns(w).length).toBe(0)
-  await w.clock.advance(1)
-  expect(otherRuns(w).length).toBe(1)
-  expect(otherRuns(w)[0]!.argv.slice(1)).toEqual(['status', '--json', '--session-id', SESSION])
-  await w.clock.advance(POLL_MS)
   expect(otherRuns(w).length).toBe(2)
+  await w.clock.advance(1)
+  expect(otherRuns(w).length).toBe(4)
+  expect(otherRuns(w).every((r) => r.argv.slice(1).join(' ') === ['status', '--json', '--session-id', SESSION].join(' '))).toBe(true)
+  await w.clock.advance(POLL_MS)
+  expect(otherRuns(w).length).toBe(8)
 })
 
 test('a tick is skipped while the previous one is still running', async ($, on) => {
@@ -56,7 +58,9 @@ test('a tick is skipped while the previous one is still running', async ($, on) 
 
   await w.clock.advance(POLL_MS * 3)
 
-  expect(otherRuns(w).length).toBe(1)
+  // The poll reads once at 15s and the spawn scan at 5s and again at 45s, when
+  // its first read ends; the ticks that arrive meanwhile read nothing.
+  expect(otherRuns(w).length).toBe(3)
 })
 
 test('a failing poll does not stop the next one', async ($, on) => {

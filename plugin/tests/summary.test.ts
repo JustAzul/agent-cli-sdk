@@ -216,7 +216,7 @@ async function bandText($: any) {
   return (await band.findAll({ type: 'Text' })).map((t: any) => t.text)
 }
 
-test('the band shows the raw newest step until the first label, then the label', async ($, on) => {
+test('the band shows no step until the first label, then the label', async ($, on) => {
   const w = world(on)
   w.surfaces = ['terminal']
   const slow = deferred()
@@ -225,12 +225,53 @@ test('the band shows the raw newest step until the first label, then the label',
   await $.session.start(START)
 
   await w.clock.advance(POLL_MS)
-  expect(await bandText($)).toEqual(['agentcli · code-review · hook-post-commit · 15s · $ rg -n token auth.go'])
+  expect(await bandText($)).toEqual(['agentcli · code-review · hook-post-commit · 15s'])
 
   slow.release(answered('Reading auth.go'))
   await w.clock.advance(BAND_REFRESH_MS)
   expect(await bandText($)).toEqual(['agentcli · code-review · hook-post-commit · 20s · Reading auth.go'])
   expect(w.modelRequests).toHaveLength(1)
+})
+
+test('the band of an unlabelled run ends after its cost, with no step', async ($, on) => {
+  const w = world(on)
+  w.surfaces = ['terminal']
+  w.respondModel = () => deferred().promise
+  const entries = flagged(w)
+  const read = w.respond
+  w.respond = (argv: string[]) => {
+    const reply = read(argv, {})
+    return argv[1] === 'progress' ? ok(JSON.stringify({ ...JSON.parse((reply as any).stdout), cost_usd: '0.123456' })) : reply
+  }
+  entries.push(msg('I will read auth.go'))
+  await $.session.start(START)
+
+  await w.clock.advance(POLL_MS)
+  await w.clock.advance(BAND_REFRESH_MS * 16)
+
+  expect(w.modelRequests).toHaveLength(1)
+  expect(await bandText($)).toEqual(['agentcli · code-review · hook-post-commit · 1m 35s · $0.12'])
+})
+
+test('a summary that fails after a label settled leaves the band with that label', async ($, on) => {
+  const w = world(on)
+  w.surfaces = ['terminal']
+  const answers = [answered('Reading auth.go'), apiError(500)]
+  w.respondModel = () => answers.shift() ?? apiError(500)
+  const entries = flagged(w)
+  entries.push(msg('e1'))
+  await $.session.start(START)
+
+  await w.clock.advance(POLL_MS)
+  await w.clock.advance(BAND_REFRESH_MS)
+  expect(await bandText($)).toEqual(['agentcli · code-review · hook-post-commit · 20s · Reading auth.go'])
+
+  entries.push(msg('e2'), msg('e3'), msg('e4'))
+  await w.clock.advance(BAND_REFRESH_MS)
+  expect(w.modelRequests).toHaveLength(2)
+  await w.clock.advance(BAND_REFRESH_MS)
+
+  expect(await bandText($)).toEqual(['agentcli · code-review · hook-post-commit · 30s · Reading auth.go'])
 })
 
 test('a headless session leaves the band with the raw newest step', async ($, on) => {
@@ -255,9 +296,9 @@ test('a 429 pauses every request for a minute, then they resume', async ($, on) 
 
   await w.clock.advance(POLL_MS)
   expect(w.modelRequests).toHaveLength(1)
-  // The failed window shows as its raw newest step.
+  // The failed window leaves the band with no step.
   await w.clock.advance(BAND_REFRESH_MS)
-  expect(await bandText($)).toEqual(['agentcli · code-review · hook-post-commit · 20s · e1'])
+  expect(await bandText($)).toEqual(['agentcli · code-review · hook-post-commit · 20s'])
 
   entries.push(msg('e2'), msg('e3'), msg('e4'))
   // The pause runs from 15s to 75s.
@@ -282,13 +323,13 @@ const REJECTED = {
 }
 
 for (const [name, reply] of Object.entries(REJECTED)) {
-  test('a label that is ' + name + ' falls back to the raw newest entry', async ($, on) => {
+  test('a label that is ' + name + ' leaves the row with no raw entry', async ($, on) => {
     const w = world(on)
     w.surfaces = ['terminal']
     w.respondModel = () => answered(reply)
     const out = await row($, w, [[msg('first'), cmd('second')], []])
 
-    expect(thinkingOf(out.chunks)).toEqual(['agentcli · second-opinion', '$ second'])
+    expect(thinkingOf(out.chunks)).toEqual(['agentcli · second-opinion'])
     expect(w.logs.filter((l) => l.includes('could not summarize'))).toHaveLength(1)
   })
 }
@@ -302,7 +343,7 @@ test('control and ANSI characters are stripped from the label', async ($, on) =>
   expect(thinkingOf(out.chunks)).toEqual(['agentcli · second-opinion', '» Reading auth.go'])
 })
 
-test('a request that rejects falls back to the raw newest entry', async ($, on) => {
+test('a request that rejects leaves the row with no raw entry', async ($, on) => {
   const w = world(on)
   w.surfaces = ['terminal']
   w.respondModel = () => {
@@ -310,31 +351,31 @@ test('a request that rejects falls back to the raw newest entry', async ($, on) 
   }
   const out = await row($, w, [[msg('first'), cmd('second')], []])
 
-  expect(thinkingOf(out.chunks)).toEqual(['agentcli · second-opinion', '$ second'])
+  expect(thinkingOf(out.chunks)).toEqual(['agentcli · second-opinion'])
   expect(w.logs.filter((l) => l.includes('could not summarize'))).toHaveLength(1)
   expect(out.text).toContain('Codex: done.')
 })
 
 for (const [name, failure] of [['an api error', apiError(500)], ['an empty reply', emptyReply()]] as const) {
-  test(name + ' falls back to the raw newest entry, logged once per run', async ($, on) => {
+  test(name + ' leaves the row with no raw entry, logged once per run', async ($, on) => {
     const w = world(on)
     w.surfaces = ['terminal']
     w.respondModel = () => failure
     const out = await row($, w, [[msg('a')], [msg('b'), msg('c'), msg('d')], [msg('e'), msg('f'), msg('g')], []])
 
-    expect(thinkingOf(out.chunks)).toEqual(['agentcli · second-opinion', 'a', 'd', 'g'])
+    expect(thinkingOf(out.chunks)).toEqual(['agentcli · second-opinion'])
     expect(w.logs.filter((l) => l.includes('could not summarize'))).toHaveLength(1)
   })
 }
 
-test('a label that comes after a failure is streamed again as a label', async ($, on) => {
+test('a label that comes after a failure is streamed as a label', async ($, on) => {
   const w = world(on)
   w.surfaces = ['terminal']
   const replies = [apiError(500), answered('Running store tests')]
   w.respondModel = () => replies.shift()
   const out = await row($, w, [[msg('a')], [msg('b'), msg('c'), msg('d')], []])
 
-  expect(thinkingOf(out.chunks)).toEqual(['agentcli · second-opinion', 'a', '» Running store tests'])
+  expect(thinkingOf(out.chunks)).toEqual(['agentcli · second-opinion', '» Running store tests'])
 })
 
 test('the row never waits for a request: the label streams on the first slice after it settles', async ($, on) => {

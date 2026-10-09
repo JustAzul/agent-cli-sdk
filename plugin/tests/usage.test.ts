@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import { BAND_REFRESH_MS } from '../hooks/band.js'
-import { NO_USAGE, POLL_MS, SESSION, answered, apiError, emptyReply, job, listing, ok, step, world } from './kit'
+import { NO_USAGE, POLL_MS, SESSION, answered, apiError, emptyReply, job, listing, ok, step, withoutSpawnNotices, world } from './kit'
 import type { Reply } from './kit'
 
 const START = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
@@ -351,18 +351,18 @@ test('the 101st failed recording drops the oldest, with one toast per load', asy
     await w.clock.advance(BAND_REFRESH_MS)
   }
   expect(unique(stdins(w))).toHaveLength(MAX_PENDING)
-  expect(w.toasts).toEqual([])
+  expect(withoutSpawnNotices(w.toasts)).toEqual([])
 
   entries.push(entry('a'), entry('b'), entry('c'))
   await w.clock.advance(BAND_REFRESH_MS)
   expect(unique(stdins(w))).toHaveLength(MAX_PENDING + 1)
-  expect(w.toasts).toEqual([DROP_TOAST])
+  expect(withoutSpawnNotices(w.toasts)).toEqual([DROP_TOAST])
   expect(w.logs.filter((l) => l.includes('dropped'))).toHaveLength(1)
 
   // A second drop is a loss too, and is logged, but shows no second toast.
   entries.push(entry('a'), entry('b'), entry('c'))
   await w.clock.advance(BAND_REFRESH_MS)
-  expect(w.toasts).toEqual([DROP_TOAST])
+  expect(withoutSpawnNotices(w.toasts)).toEqual([DROP_TOAST])
   expect(w.logs.filter((l) => l.includes('dropped'))).toHaveLength(2)
 
   // The two oldest are gone for good; the other hundred are recorded in order.

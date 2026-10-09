@@ -81,7 +81,8 @@ test('a subagent of an agent type is answered by an agentcli job, never by the m
   expect(admit.argv.slice(1)).toEqual(['exec', '--scenario', 'second-opinion', ...JOB_FLAGS, '-'])
   // The prompt travels on standard input, never inside an argument.
   expect(admit.stdin).toBe('Is a TTL cache safe here?')
-  expect(w.runs.map((r) => r.argv[1])).toEqual(['exec', 'wait', 'progress', 'status', 'result'])
+  // The spawn notice's ETA lookup runs beside the turn.
+  expect(w.runs.map((r) => r.argv[1]).filter((command) => command !== 'eta')).toEqual(['exec', 'wait', 'progress', 'status', 'result'])
   expect(out.text).toContain('Codex says the cache is safe.')
   expect(out.text).toContain('[agentcli run run-1 · conversation conv-1 · ok]')
   expect(out.result.answer).toBe(out.text)

@@ -23,6 +23,7 @@ import {
 } from './lib.js'
 import {
   ADMIT_TIMEOUT_MS,
+  AGENT_SOURCE,
   CONVERSATIONS_KEY,
   DISPATCH_SKILL,
   LOST_CONVERSATION,
@@ -64,6 +65,7 @@ import {
 import { BAND_REFRESH_MS, bandLine, flaggedRuns, followedRuns, labelled, withProgress } from './band.js'
 import { createSummarizer } from './summarizer.js'
 import { usageAddCommand } from './summary.js'
+import { ETA_TIMEOUT_MS, ETA_UNAVAILABLE, etaCommand, etaText, endedSince, finishedTail, isAnnounceable, listedRuns, spawnNotice } from './spawn.js'
 
 const COMMAND = 'agentcli-jobs'
 const NO_TOOLS = 'agentcli agents run no tools: an agentcli job answers for them.'
@@ -75,6 +77,8 @@ const DISPATCH_LOADED = { plugin: 'agentcli', key: 'dispatchLoaded' }
 // --agent-feedback that is still going. Session state, so the band redraws on
 // each write and a reload keeps what it shows.
 const HOOK_RUNS = { plugin: 'agentcli', key: 'hookRuns' }
+// The runs already announced as spawned, newest last, kept across reloads.
+const SPAWN_NOTIFIED = { plugin: 'agentcli', key: 'spawnNotified' }
 // A step's response: what the run is doing as thinking, then the answer.
 const THINKING_BLOCK = 0
 const ANSWER_BLOCK = 1
@@ -131,11 +135,38 @@ const LOST_RECORDINGS_TOAST = 'some summary costs could not be recorded; the Cla
 const pendingRecordings = []
 let isLossToastShown = false
 const pricedModels = new Set()
+// The spinners already logged, by request id.
+const loggedSpinners = new Set()
 // Runs whose progress could not be read, each logged once.
 const loggedProgressFailures = new Set()
 // The agent ids this load has resolved: the type name for one of this plugin's
 // agent types, null for any other agent. A reload refills it from $.agent.list().
 const knownTypes = new Map()
+// The agents whose turn is running in this load, by agent id: the run each
+// follows and its type name. The spinner of such an agent says what the run does.
+const turnAgents = new Map()
+// The directory the session runs in, for the ETA lookups.
+let sessionCwd = ''
+// When this load started: a finished run in its first listing is announced only
+// if it ended since.
+let loadedAt = 0
+let spawnTimer = null
+let isScanningSpawns = false
+// The runs the scans of this load have seen, and whether a failed ETA lookup has
+// been logged in this load.
+let seenRuns = new Set()
+let isEtaFailureLogged = false
+// Whether this load has read its first listing, which announces only the runs
+// still going or ended since the load.
+let hasSpawnBaseline = false
+let isScanFailureLogged = false
+// Whether this load has logged a status read that failed at admission, a
+// notice that could not be shown, and a listed run it had to skip.
+let isTurnReadFailureLogged = false
+let isNoticeFailureLogged = false
+let isSkippedRunLogged = false
+// Writes to the announced runs are read, changed and written back one at a time.
+let spawnWrites = Promise.resolve()
 // The progress summaries of this load, which the config of the load decides.
 let summaries = createSummarizer({})
 // Conversation records are read, changed and written back; one write at a time
@@ -156,6 +187,19 @@ export function register(on, options) {
     if (bandTimer !== null) bandTimer.cancel()
     bandTimer = $.clock.every(BAND_REFRESH_MS, () => {
       void refreshBand($)
+    })
+    sessionCwd = e.cwd
+    loadedAt = await $.clock.now()
+    seenRuns = new Set()
+    isEtaFailureLogged = false
+    hasSpawnBaseline = false
+    isScanFailureLogged = false
+    isTurnReadFailureLogged = false
+    isNoticeFailureLogged = false
+    isSkippedRunLogged = false
+    if (spawnTimer !== null) spawnTimer.cancel()
+    spawnTimer = $.clock.every(BAND_REFRESH_MS, () => {
+      void scanSpawns($)
     })
     requestRefresh($, SESSION_START_REFRESH)
     // Last, because a taken command name makes the call throw.
@@ -213,6 +257,19 @@ export function register(on, options) {
     if ((await subagentTypeOf($, e.agentId)) === null) return next(e)
     return { deny: NO_TOOLS }
   }).catch(($, e, next) => (next.called || !isKnownSubagent(e.agentId) ? next(e) : { deny: NO_TOOLS }))
+
+  // The spinner of an agentcli agent's turn says what its run is doing.
+  on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
+    if (!loggedSpinners.has(e.requestId)) {
+      loggedSpinners.add(e.requestId)
+      $.ui.log('Spinner raised for ' + e.requestId + ' with the word ' + e.props.word, { to: 'debug' })
+    }
+    const agent = turnAgents.get(e.requestId)
+    // A message the engine set is not the run's to replace.
+    if (agent === undefined || e.props.message != null) return next(e)
+    const message = summaries.shown(agent.runId) ?? 'agentcli · ' + agent.type
+    return next({ ...e, props: { ...e.props, message } })
+  }).catch(($, e, next) => next(e))
 
   // The band above the prompt shows what the runs other callers flagged are
   // doing. Only the person sees it; their results stay with their callers.
@@ -283,7 +340,8 @@ async function registerTools($) {
 // startTurn serves the ask and send tools.
 async function startTurn($, e, kind) {
   const sessionId = await $.session.id()
-  const built = turnCommand(kind, shimPath($.plugin.root), sessionId, e)
+  const bin = shimPath($.plugin.root)
+  const built = turnCommand(kind, bin, sessionId, e)
   if (built.error) return { deny: built.error }
   let reply
   try {
@@ -294,7 +352,173 @@ async function startTurn($, e, kind) {
   if (reply.exitCode !== 0) return { deny: failureText(reply) }
   const ids = admittedJob(reply.stdout)
   if (ids === null) return { deny: 'agentcli printed an unexpected admission result: ' + reply.stdout.trim().slice(0, 500) }
+  startNotice($, () => notifyTurn($, bin, ids.run_id))
   return { result: JSON.stringify(ids) }
+}
+
+// startNotice runs the work of a notice from a timer, so it outlives the hook
+// that admitted the run and nothing in the hook waits for it.
+function startNotice($, work) {
+  $.clock.after(0, () => {
+    void work()
+  })
+}
+
+// notifyTurn announces the run of an ask or send with the scenario and source
+// the run itself reports. A run whose status cannot be read is left to the scan.
+// It never throws.
+async function notifyTurn($, bin, runId) {
+  let failure
+  try {
+    const reply = await $.process.run([bin, 'status', runId, '--json'])
+    if (reply.exitCode === 0) {
+      const run = JSON.parse(reply.stdout)
+      if (typeof run.scenario === 'string' && typeof run.source === 'string') return notifyAdmitted($, bin, runId, run.scenario, run.source)
+      failure = 'the run reports no scenario or source'
+    } else {
+      failure = failureText(reply)
+    }
+  } catch (error) {
+    failure = messageOf(error)
+  }
+  if (isTurnReadFailureLogged) return
+  isTurnReadFailureLogged = true
+  $.ui.log('could not read run ' + runId + ' to announce it: ' + failure + '; the next scan announces it', { to: 'debug' })
+}
+
+// scanSpawns reads the session's runs and announces the ones it has not seen.
+// It never overlaps itself.
+async function scanSpawns($) {
+  if (isScanningSpawns) return
+  isScanningSpawns = true
+  try {
+    const bin = shimPath($.plugin.root)
+    const reply = await $.process.run([bin, 'status', '--json', '--session-id', await $.session.id()])
+    if (reply.exitCode !== 0) return logScanFailure($, failureText(reply))
+    const listed = listedRuns(reply.stdout)
+    if (listed === null) return logScanFailure($, 'the listing could not be read')
+    isScanFailureLogged = false
+    const isBaseline = !hasSpawnBaseline
+    const claimed = await claimListed($, listed)
+    hasSpawnBaseline = true
+    for (const run of claimed) {
+      if (!isTerminal(run.state)) await showSpawn($, run, () => lookupEta($, bin, run.scenario))
+      else if (!isBaseline || endedSince(run, loadedAt)) await showSpawn($, run, () => finishedTail(run))
+    }
+  } catch (error) {
+    logScanFailure($, messageOf(error))
+  } finally {
+    isScanningSpawns = false
+  }
+}
+
+// claimListed claims the listed runs a notice can be written for, oldest first,
+// and returns the ones this call claimed. Every run is claimed before any is
+// announced, so a notice that fails cannot leave a finished run of the baseline
+// to be announced later.
+async function claimListed($, listed) {
+  const claimed = []
+  for (const run of oldestFirst(listed)) {
+    if (!isAnnounceable(run)) {
+      logSkippedRun($, run.run_id)
+      continue
+    }
+    if (await claimSpawn($, run.run_id)) claimed.push(run)
+  }
+  return claimed
+}
+
+// logSkippedRun logs the first listed run of the load that had to be skipped;
+// a later listing that gives it what it lacked announces it.
+function logSkippedRun($, runId) {
+  if (isSkippedRunLogged) return
+  isSkippedRunLogged = true
+  $.ui.log('skipped run ' + runId + ' in the spawn scan: the listing gives it no scenario, source or state', { to: 'debug' })
+}
+
+// logScanFailure logs a failed scan once until a scan succeeds; the next period
+// tries again either way.
+function logScanFailure($, failure) {
+  if (isScanFailureLogged) return
+  isScanFailureLogged = true
+  $.ui.log('could not list the runs of the session for spawn notices: ' + failure, { to: 'debug' })
+}
+
+// showSpawn shows the notice of a listed run. A notice that cannot be shown is
+// logged and does not stop the scan.
+async function showSpawn($, run, tail) {
+  try {
+    await announceSpawn($, run.scenario, run.source, await tail())
+  } catch (error) {
+    logNoticeFailure($, run.scenario, error)
+  }
+}
+
+// logNoticeFailure logs the first notice of the load that could not be shown.
+function logNoticeFailure($, scenario, error) {
+  if (isNoticeFailureLogged) return
+  isNoticeFailureLogged = true
+  $.ui.log('could not show the spawn notice of ' + scenario + ': ' + messageOf(error), { to: 'debug' })
+}
+
+// claimSpawn records a run as announced and tells whether this call is the one
+// that did: false when this load or an earlier one already has.
+async function claimSpawn($, runId) {
+  if (seenRuns.has(runId)) return false
+  seenRuns.add(runId)
+  let isNew = true
+  const write = spawnWrites.then(async () => {
+    const announced = readNotified((await $.state.get(SPAWN_NOTIFIED)).value)
+    if (announced.includes(runId)) {
+      isNew = false
+      return
+    }
+    await $.state.set(SPAWN_NOTIFIED, remember(announced, runId))
+  })
+  spawnWrites = write.catch(() => {})
+  try {
+    await write
+  } catch (error) {
+    // Without the record the run is announced once for this load.
+    $.ui.log('could not record the spawn notice of run ' + runId + ': ' + messageOf(error), { to: 'debug' })
+  }
+  return isNew
+}
+
+// notifyAdmitted announces a run this mod admitted itself, unless the scan has
+// already. It never throws.
+async function notifyAdmitted($, bin, runId, scenario, source) {
+  try {
+    if (!(await claimSpawn($, runId))) return
+    await announceSpawn($, scenario, source, await lookupEta($, bin, scenario))
+  } catch (error) {
+    logNoticeFailure($, scenario, error)
+  }
+}
+
+async function announceSpawn($, scenario, source, tail) {
+  const text = spawnNotice(scenario, source, tail)
+  await $.ui.toast(text)
+  await $.ui.log(text)
+}
+
+// lookupEta is the ETA part of a notice, or the unavailable text when it could
+// not be read (logged once per load).
+async function lookupEta($, bin, scenario) {
+  let failure
+  try {
+    const reply = await $.process.run(etaCommand(bin, scenario, sessionCwd), { timeoutMs: ETA_TIMEOUT_MS })
+    const text = reply.exitCode === 0 ? etaText(reply.stdout) : null
+    if (text !== null) return text
+    failure = reply.exitCode === 0 ? 'unreadable output' : failureText(reply)
+  } catch (error) {
+    failure = messageOf(error)
+  }
+  if (!isEtaFailureLogged) {
+    isEtaFailureLogged = true
+    $.ui.log('could not read the ETA of ' + scenario + ': ' + failure, { to: 'debug' })
+  }
+  return ETA_UNAVAILABLE
 }
 
 // runJobsAction serves the jobs tool.
@@ -306,16 +530,20 @@ async function runJobsAction($, e) {
   try {
     reply = await $.process.run(built.argv)
   } catch (error) {
-    return { deny: 'agentcli could not run: ' + String(error && error.message ? error.message : error) }
+    return { deny: 'agentcli could not run: ' + messageOf(error) }
   }
   if (reply.exitCode !== 0) return { deny: failureText(reply) }
+  return jobsAnswer($, e, reply)
+}
+
+// jobsAnswer is the jobs tool's answer to an action whose command exited 0.
+async function jobsAnswer($, e, reply) {
   if (e.action === 'cancel') return { result: reply.stdout.trim() || 'cancellation requested for ' + e.run_id }
-  if (e.action === 'result') {
-    const cut = cutBytes(reply.stdout, RESULT_OUTPUT_BYTES)
-    if (!cut.isCut) return { result: reply.stdout || reply.stderr.trim() || 'The run produced no output.' }
-    return { result: cut.text + '\n' + resultNote(await outputPathOf($, shimPath($.plugin.root), e.run_id)) }
-  }
-  return { result: reply.stdout }
+  if (e.action !== 'result') return { result: reply.stdout }
+
+  const cut = cutBytes(reply.stdout, RESULT_OUTPUT_BYTES)
+  if (!cut.isCut) return { result: reply.stdout || reply.stderr.trim() || 'The run produced no output.' }
+  return { result: cut.text + '\n' + resultNote(await outputPathOf($, shimPath($.plugin.root), e.run_id)) }
 }
 
 // listJobs serves /agentcli-jobs.
@@ -425,30 +653,53 @@ async function sessionCost($, bin, sessionId) {
 // leaves the run as it was, and a failed refresh is logged once until one
 // succeeds; the next refresh tries again either way.
 async function refreshBand($) {
-  if (!hasPolledRuns || isRefreshingBand || (followed.length === 0 && shownBand === '[]')) return
+  if (!isBandDue()) return
   isRefreshingBand = true
   try {
-    const bin = shimPath($.plugin.root)
-    const read = new Map()
-    for (const run of followed) read.set(run.run_id, await newProgress($, bin, run.run_id, run.from))
+    const read = await readFollowed($)
     // Applied to the list as it is now: a poll may have changed it meanwhile.
     setFollowed(withProgress(followed, read))
-    const labels = new Map()
-    for (const run of followed) {
-      if (!(await summaries.observe(summaryPorts($), run.run_id, read.get(run.run_id)?.text ?? []))) continue
-      labels.set(run.run_id, summaries.shown(run.run_id))
-    }
+    const labels = await bandLabels($, read)
     const now = await $.clock.now()
     await showBand($, followed.map((run) => ({ run_id: run.run_id, text: bandLine(labelled(run, labels.get(run.run_id)), now) })))
     isBandFailureLogged = false
   } catch (error) {
-    if (!isBandFailureLogged) {
-      isBandFailureLogged = true
-      $.ui.log('could not update the band above the prompt: ' + messageOf(error), { to: 'debug' })
-    }
+    logBandFailure($, error)
   } finally {
     isRefreshingBand = false
   }
+}
+
+// isBandDue tells that a refresh has work: the first poll has read the session's
+// runs, no refresh is running, and the band follows a run or still shows one.
+function isBandDue() {
+  return hasPolledRuns && !isRefreshingBand && (followed.length > 0 || shownBand !== '[]')
+}
+
+// readFollowed reads what each followed run did since its last read.
+async function readFollowed($) {
+  const bin = shimPath($.plugin.root)
+  const read = new Map()
+  for (const run of followed) read.set(run.run_id, await newProgress($, bin, run.run_id, run.from))
+  return read
+}
+
+// bandLabels is what each followed run shows in place of its newest raw step
+// while summaries are active: its label, or null before one. A run whose
+// summaries are not active has no entry and keeps its raw step.
+async function bandLabels($, read) {
+  const labels = new Map()
+  for (const run of followed) {
+    if (!(await summaries.observe(summaryPorts($), run.run_id, read.get(run.run_id)?.text ?? []))) continue
+    labels.set(run.run_id, summaries.shown(run.run_id))
+  }
+  return labels
+}
+
+function logBandFailure($, error) {
+  if (isBandFailureLogged) return
+  isBandFailureLogged = true
+  $.ui.log('could not update the band above the prompt: ' + messageOf(error), { to: 'debug' })
 }
 
 // setFollowed replaces the runs the band follows; a run it lets go of keeps no
@@ -582,6 +833,9 @@ function summaryPorts($) {
     complete: (request) => $.model.complete(request),
     record: (usage, runId) => recordUsage($, usage, runId),
     log: (text) => $.ui.log(text, { to: 'debug' }),
+    labelSettled: (runId) => {
+      if ([...turnAgents.values()].some((agent) => agent.runId === runId)) $.ui.invalidate('ui.render')
+    },
   }
 }
 
@@ -666,6 +920,8 @@ async function* followTurn($, agentId, type, signal) {
     return yield* runSubagentTurn($, agentId, type, signal)
   } catch (error) {
     return handoffFailure(messageOf(error))
+  } finally {
+    turnAgents.delete(agentId)
   }
 }
 
@@ -682,6 +938,8 @@ async function* runSubagentTurn($, agentId, type, signal) {
   const ids = admittedJob(reply.stdout)
   if (ids === null) return handoffFailure('agentcli printed an unexpected admission result: ' + reply.stdout.trim().slice(0, 500))
 
+  startNotice($, () => notifyAdmitted($, bin, ids.run_id, type, AGENT_SOURCE))
+  turnAgents.set(agentId, { runId: ids.run_id, type })
   await recordConversation($, agentId, ids.conversation_id)
   yield* followOwnRun($, bin, ids.run_id, signal)
   return finalAnswer($, bin, ids.run_id)

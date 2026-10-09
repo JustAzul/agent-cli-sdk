@@ -112,7 +112,7 @@ export function labelLine(label) {
 // newRun is what is known of one run's summaries: the entries since the last
 // request, the last label and what the display is to show next.
 export function newRun() {
-  return { entries: [], hasRequested: false, isInFlight: false, label: null, shown: null, isUnread: false, isFailureLogged: false }
+  return { entries: [], hasRequested: false, isInFlight: false, label: null, isUnread: false, isFailureLogged: false }
 }
 
 // isDue tells that a run asks for a label now: its first entry has arrived, or

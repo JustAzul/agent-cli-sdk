@@ -10,7 +10,8 @@ test('ask admits a background job and returns its ids', async ($, on) => {
 
   const out: any = await $.tool.call({ tool: TOOL('ask'), prompt: 'review this' })
 
-  expect(w.runs.length).toBe(1)
+  // The status read that follows the admission is the spawn notice's.
+  expect(w.runs.filter((r) => r.argv[1] === 'exec').length).toBe(1)
   const run = w.runs[0]!
   expect(isShim(run.argv[0]!)).toBe(true)
   expect(run.argv.slice(1)).toEqual(['exec', '--background', '--json', '--source', 'mod', '--session-id', SESSION, '-'])

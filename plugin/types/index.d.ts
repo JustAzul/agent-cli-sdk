@@ -8,6 +8,8 @@ declare module 'claude-code' {
       // The band's lines: one for each run another caller started with
       // --agent-feedback that is still going, as the band shows it.
       hookRuns: { run_id: string; text: string }[]
+      // The ids of the runs announced as spawned, newest last, at most 500.
+      spawnNotified: string[]
     }
   }
 }

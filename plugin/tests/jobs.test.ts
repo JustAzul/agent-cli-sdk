@@ -43,6 +43,27 @@ test('jobs status, result and cancel map to the matching commands', async ($, on
   expect(cancel.result).toContain('cancellation requested')
 })
 
+test('jobs status returns what agentcli printed, unchanged', async ($, on) => {
+  const w = world(on)
+  const printed = JSON.stringify(job({ state: 'done', outcome: 'ok' })) + '\n'
+  w.respond = () => ok(printed)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const status: any = await call($, { action: 'status', run_id: 'run-1' })
+
+  expect(status.result).toBe(printed)
+})
+
+test('jobs cancel says the cancellation was requested when agentcli prints nothing', async ($, on) => {
+  const w = world(on)
+  w.respond = () => ok('')
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+
+  const cancel: any = await call($, { action: 'cancel', run_id: 'run-1' })
+
+  expect(cancel.result).toBe('cancellation requested for run-1')
+})
+
 test('jobs maps a missing run to an error the model can read', async ($, on) => {
   const w = world(on)
   w.respond = () => ({ exitCode: 4, stdout: JSON.stringify({ sdk_status: 'not_found', exit_code: 4, error: 'no run "nope"' }), stderr: '' })

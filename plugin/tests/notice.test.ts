@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { POLL_MS, job, listing, ok, world } from './kit'
+import { POLL_MS, job, listing, ok, withoutSpawnNotices, world } from './kit'
 
 const START = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 const KIB8 = 8192
@@ -41,7 +41,7 @@ test('running jobs and foreground runs raise no notice', async ($, on) => {
 
   await w.clock.advance(POLL_MS)
 
-  expect(w.toasts).toEqual([])
+  expect(withoutSpawnNotices(w.toasts)).toEqual([])
   expect(w.submits).toEqual([])
 })
 

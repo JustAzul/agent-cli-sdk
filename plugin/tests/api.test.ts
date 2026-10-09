@@ -1,4 +1,5 @@
 import { expect, test } from 'claude-code/testing'
+import { BAND_REFRESH_MS } from '../hooks/band.js'
 import { listing, otherRuns, world } from './kit'
 
 const START = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
@@ -51,7 +52,12 @@ test('a command that is refused is logged and does not stop the session from sta
   expect(w.tools.map((t) => t.name).sort()).toEqual(['ask', 'jobs', 'send'])
   expect(w.logs.length).toBe(1)
   expect(w.logs[0]).toContain('agentcli-jobs')
-  // The poll is running although the command was refused.
-  await w.clock.advance(15000)
+  // The poll is running although the command was refused: its read joins the
+  // spawn read of the third period.
+  await w.clock.advance(BAND_REFRESH_MS)
   expect(otherRuns(w).length).toBe(1)
+  await w.clock.advance(BAND_REFRESH_MS)
+  expect(otherRuns(w).length).toBe(2)
+  await w.clock.advance(BAND_REFRESH_MS)
+  expect(otherRuns(w).length).toBe(4)
 })
