@@ -24,7 +24,7 @@ package boundaries so no slice invents its own version.
 | `internal/provider/codex` | the Codex adapter: plan building and event parsing |
 | `internal/runner` | plan → spawn → stream-parse → finalize, for foreground and worker modes |
 | `internal/store` | home resolution, run directories, conversations, state files, locks |
-| `internal/telemetry` | record types (`run`, `annotation`, `model_call`), append, fold, `runs` export, `stats` |
+| `internal/telemetry` | record types (`run`, `annotation`, `model_call`), append, fold, `runs` export, `stats`, the ETA estimate |
 | `internal/prices` | the price cache, price-list parsing, wanted models, run and model-call cost, the implicit-cache flag |
 | `internal/profile` | built-in scenario profiles and precedence resolution |
 | `internal/link` | launcher resolution and writing |
@@ -260,6 +260,61 @@ after the point, and no point for whole numbers. `prices.lock` uses `flock(2)`
 like the other locks. A model-call provider's models sit under its own key
 (`"anthropic": {"claude-haiku-5-5": {…}}`) once a refresh has priced them.
 
+## ETA estimate
+
+`agentcli eta --scenario <name> [--cwd <dir>] [--json]` folds the whole
+telemetry history (no window, no `--days` or `--all`) and passes the folded runs
+to `telemetry.EstimateETA(runs, scenario, cwd, repoKey)`. The repo-key function
+is a parameter: the command passes the git lookup below, and module tests pass a
+stub that names which directories share a repository.
+
+- Usage errors exit 2 with the usual error object: `--scenario` missing or
+  empty, an unknown flag, a positional argument. `--cwd` defaults to the process
+  working directory and is made absolute (`filepath.Abs`), because telemetry
+  records absolute cwds and a relative directory outside git would match none.
+  A working directory, home or telemetry that cannot be read exits 70.
+- Samples: folded runs whose `scenario` equals `--scenario`, whose `cwd` is a
+  non-empty string and whose `duration_ms` reads as a number (`asInt`: a JSON
+  number, or a string holding an integer). Every outcome counts, `null`
+  included. Model calls are not among the folded runs. A run whose
+  `duration_ms` does not read as a number counts in neither `samples` nor
+  `repos`. Skipped
+  telemetry lines are not reported (`stats` reports them).
+- Repo key of a directory: the trimmed stdout of
+  `git -C <dir> rev-parse --path-format=absolute --git-common-dir`, which a work
+  tree, its subdirectories and its linked worktrees share. When that fails for
+  any reason (the directory is gone, it is not a repository, git is missing, a
+  non-zero exit) or prints nothing, the key is the directory string itself. Each
+  distinct directory, `--cwd` included, is resolved once per invocation.
+- The target key is the repo key of `--cwd`.
+  - Some sample has the target key → `basis: "repo"`: `eta_ms` is the mean
+    `duration_ms` of those samples, `samples` their count, `repos` 1.
+  - Otherwise, with samples → `basis: "global"`: samples are grouped by repo
+    key, `eta_ms` is the mean of the group means (every repository weighs the
+    same), `samples` is every sample and `repos` the number of groups.
+  - No samples → `basis: "none"`, `eta_ms: null`, `samples: 0`, `repos: 0`,
+    exit 0.
+- `eta_ms` is rounded to the nearest integer millisecond, half away from zero
+  (`math.Round`).
+
+With `--json`, stdout is one object, keys in this order, exit 0. `repo` is the
+target key whatever the basis:
+
+```json
+{"sdk_status":"ok","exit_code":0,"scenario":"code-review","repo":"/work/repo/.git","basis":"repo","eta_ms":156000,"samples":12,"repos":1}
+```
+
+Without it, stdout is one line:
+
+- `ETA ~2m 36s (repo average, 12 runs)`
+- `ETA ~2m 23s (global average, 8 repos)`
+- `ETA unknown (no history)`
+
+`1 run` and `1 repo` are singular. The duration is `floor(eta_ms / 1000)`
+seconds, written `<s>s` under 60 seconds and `<m>m <s>s` otherwise: for a
+duration that is not negative, the text `formatElapsed` in
+`plugin/hooks/subagent.js` gives.
+
 ## Mod: progress summaries
 
 The plugin manifest (`plugin/.claude-plugin/plugin.json`) gains a `userConfig`
@@ -269,7 +324,16 @@ Anthropic API. `register(on, options)` reads `options.summaries`.
 
 - Active when `options.summaries !== false` and
   `(await $.session.surfaces()).length > 0`, read at each summary. Otherwise the
-  mod keeps its behaviour from before the summaries.
+  mod keeps its behaviour from before the summaries: raw entries in the row and
+  the band.
+- While summaries are active, neither the agent row nor the band shows a raw
+  progress entry. The row streams `» <label>` for each label that settles, and
+  the band's last part is the newest label; before a run's first label the band
+  line ends after the cost part (`labelled` gives the run an empty step, which
+  `bandLine` drops). A failed or rejected summary keeps the previous label: the
+  row streams nothing new and the failure is logged once per run. The row's
+  first line `agentcli · <type>`, the `still working · <elapsed>` line and the
+  final answer are unchanged.
 - The call is
   `$.model.complete({ model: 'claude-haiku-5-5', effort: 'low', system: SYSTEM, prompt, maxTokens: 40, timeoutMs: 15000 })`
   inside try/catch, because a rejection counts as a failure.
@@ -283,8 +347,8 @@ Anthropic API. `register(on, options)` reads `options.summaries`.
 - A summary request that is due while the in-flight caps (1 per run, 2 per
   session) are full or the 429 pause is on is deferred, never dropped. It is made
   once a slot frees or the pause ends, with the window as it stands then. Until
-  then the band keeps its last label (the raw newest step before the first
-  label) and the row streams nothing new.
+  then the band keeps its last label (no step part before the first label) and
+  the row streams nothing new.
 - After every completion whose usage has any non-zero count, the mod runs
   `[bin, 'usage', 'add', '--session-id', sid, '--provider', 'anthropic', '--model', 'claude-haiku-5-5', '--source', 'mod-summary', '--run-id', runId, '--json']`
   with stdin `JSON.stringify(usage)`. An exit 0 increments the module counter
@@ -318,6 +382,112 @@ Previous label: <label> (say something NEW).
 
 The last paragraph is left out when there is no previous label.
 
+## Mod: spinner
+
+- A `ui.render` hook on `{ component: 'Spinner' }`, whose `.catch` draws the
+  spinner untouched (`next(e)`).
+- `turnAgents` is a module map, agent id → `{ runId, type }`: an entry is set
+  once the turn's job is admitted and deleted when the turn ends, so it holds
+  the agentcli subagents whose turn is running in this load.
+- When `e.requestId` is in `turnAgents` and the engine has set no `message`
+  (`e.props.message` is null or absent), the hook returns
+  `next({ ...e, props: { ...e.props, message } })`. `message` is the run's
+  newest label (`summaries.shown(runId)`), which exists only while summaries are
+  active, otherwise `agentcli · <type>`. It is the bare label, without the row's
+  `» ` mark. A message the engine set (a compaction's, say) stays, and any other
+  spinner is `next(e)`, untouched.
+- The first time the hook sees a request id, it logs
+  `Spinner raised for <requestId> with the word <word>` with `{ to: 'debug' }`.
+  Every spinner is logged, not only those of known agents. The ids already
+  logged sit in the module-level set `loggedSpinners`, which `session.start`
+  does not reset, so the line is written once per request id per load of the
+  module.
+- The summarizer's port `labelSettled(runId)`, called when a label settles,
+  runs `$.ui.invalidate('ui.render')` when an agent in `turnAgents` follows that
+  run, so the spinner is drawn again with the new label.
+
+## Mod: spawn notice
+
+Each run of the session gets one notice, shown with `$.ui.toast(text)` and
+`$.ui.log(text)` (the transcript):
+
+```
+agentcli · spawned <scenario> · trigger <source> · ETA ~2m 36s (repo average, 12 runs)
+agentcli · spawned <scenario> · trigger <source> · ETA ~2m 23s (global average, 8 repos)
+agentcli · spawned <scenario> · trigger <source> · ETA unknown (no history)
+agentcli · spawned <scenario> · trigger <source> · ETA unavailable
+agentcli · spawned <scenario> · trigger <source> · finished in 3s
+```
+
+`<scenario>` and `<source>` are the run's own values.
+
+- Claim: before a run is announced, `claimSpawn(runId)` records it in the
+  `$.state` key `spawnNotified` (a `string[]` of run ids, newest last, the newest
+  500 kept, declared in `plugin/types/index.d.ts`) and tells whether this call
+  recorded it. A run this load has already claimed, or whose id the key already
+  holds, is not announced again, so a run gets one notice across the admission
+  path, the listings and reloads. Claims run one at a time (each reads, changes
+  and writes the key back), so two made together both land. A write that fails
+  is logged to the debug log every time, and the run is still announced once
+  for the load; a later load may announce it again.
+- Runs the mod admits itself (an agentcli agent type's turn, the `ask` and
+  `send` tools) are announced by work that `startNotice` hands to
+  `$.clock.after(0, …)` right after admission, so neither the tool result nor
+  the turn waits for it (`notifyAdmitted`). An agent type's run has the type
+  name as scenario and `agent` as source, which is what the type passes. For
+  `ask` and `send`, `notifyTurn` first reads `[bin, 'status', <run_id>, '--json']`
+  and takes the run's own `scenario` and `source` (`mod`), since `send` reuses
+  the conversation's first-turn scenario, which the tool does not know. A read
+  that exits non-zero, throws, cannot be parsed or names no string scenario and
+  source leaves the run to the next listing and goes to the debug log once per
+  load.
+- Every other run (a hook's, or one started from the CLI with the session id)
+  is found by `scanSpawns`, which a `$.clock.every(BAND_REFRESH_MS, …)` timer
+  (5 seconds) started at `session.start` runs. It reads
+  `[bin, 'status', '--json', '--session-id', <session id>]` and never overlaps
+  itself. The listing holds the session's 20 newest runs (`statusLimit` in
+  `internal/cli/cmd_status.go`), so when more than 20 runs start between two
+  reads, the oldest of those not announced at admission get no notice. A listing that exits non-zero, throws, or is not an object with a
+  `runs` array is a failed scan: it sets no baseline and goes to the debug log
+  once, until a scan succeeds. This read is its own; the 15-second poll keeps
+  doing what it did.
+  - A scan first claims every run of its listing, oldest first, then announces
+    the runs it claimed, so a notice that fails cannot leave a run of the
+    baseline to be announced by a later scan.
+  - A listed run with no non-empty `scenario`, `source` or `state` string
+    (`isAnnounceable` in `plugin/hooks/spawn.js`) is neither claimed nor
+    announced; the first one of a load goes to the debug log as
+    `skipped run <id> in the spawn scan: the listing gives it no scenario,
+    source or state`. A later listing that gives it all three announces it.
+  - The first listing of a load that succeeds is its baseline. A claimed run
+    that is not terminal is announced with its ETA. A claimed terminal run is
+    announced as finished only when its `ended_at` falls in or after the second
+    of the load (`loadedAt`, `$.clock.now()` read at `session.start`, compared
+    from the start of its second, since run timestamps carry no fractions);
+    the others stay silent. A missing or unreadable `ended_at` stays silent.
+  - After the baseline, a claimed run is announced: not terminal → the ETA
+    notice; terminal → `finished in <d>`, with no ETA lookup. `<d>` is
+    `formatElapsed` of `ended_at` minus `started_at` (else `admitted_at`); when
+    a timestamp is missing or unreadable the tail is `finished`, with no
+    duration.
+  - Each `session.start` starts a new baseline: the runs this load has seen,
+    `loadedAt` and the logged-once flags are reset.
+- ETA: `lookupEta` runs
+  `[bin, 'eta', '--scenario', <scenario>, '--cwd', <session cwd>, '--json']`
+  with `timeoutMs: ETA_TIMEOUT_MS` (10 seconds, so a stalled git cannot hold a
+  scan), the session cwd being `e.cwd` of `session.start`, because the run
+  listing carries no cwd; a run that works in another repository gets the
+  estimate of the session's repository. The mod writes the ETA part from the
+  JSON: `basis` `repo` → `ETA ~<formatElapsed(eta_ms)> (repo average, <samples> run[s])`,
+  `global` → `ETA ~<formatElapsed(eta_ms)> (global average, <repos> repo[s])`,
+  `none` → `ETA unknown (no history)`. Anything else gives `ETA unavailable`:
+  a non-zero exit, a process error, output that is not JSON, an
+  unknown basis, an `eta_ms` that is not a finite number under `repo` or
+  `global`, or a `samples` (`repo`) or `repos` (`global`) that is not a
+  non-negative integer. A failed lookup goes to the debug log once per load.
+- A notice that cannot be shown (its toast or transcript line throws) goes to
+  the debug log once per load and does not stop the scan.
+
 ## Test harness
 
 - `test/e2e` builds `agentcli` and `fakecodex` once in `TestMain` into a temp
@@ -349,7 +519,13 @@ The last paragraph is left out when there is no previous label.
   scripted replies) and `session.surfaces` (it answers `[]` by default, so the
   tests that existed before the summaries stay headless and unchanged; a test
   that wants summaries opts in with a surface). A test sets the plugin options
-  (`summaries`) that `register(on, options)` receives.
+  (`summaries`) that `register(on, options)` receives. The kit also keeps the
+  texts sent to the debug log apart (`debugLogs`), records every event name the
+  plugin asks to redraw (`invalidations`), and draws the engine's `Spinner` as
+  its `message`, else its `word`.
+- ETA tests write run records into the sandbox home's month file and build real
+  git repositories, a linked worktree and plain directories under temp
+  directories; `git` must be on `PATH`.
 - Live-usage tests set `CODEX_HOME` to a temp directory and write a Codex session
   file there (`sessions/<y>/<m>/<d>/rollout-<time>-<thread id>.jsonl`) holding
   `turn_context` and `token_count` lines; the fake provider writes none itself.

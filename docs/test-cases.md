@@ -1,6 +1,6 @@
 # Verification Checklist: agentcli (`agentcli`)
 
-**Date**: 2026-10-04 (updated 2026-10-08: session cost; progress summaries and Claude spend, group R)
+**Date**: 2026-10-04 (updated 2026-10-08: session cost; progress summaries and Claude spend, group R; spawn notice, ETA and spinner, group S)
 **Status**: Draft
 
 Unless stated otherwise:
@@ -171,7 +171,7 @@ Expected cached prices (US dollars per million tokens):
 - [ ] **re-read after a change (FR70, FR77):** a refresh answering `ran: true, changed: true` → the next poll runs `stats` again, even though no run ended.
 - [ ] **live cost of a running run (FR79):** a background run with provider session `T`, kept running by the fake, and the price cache holding `m-sol`. `CODEX_HOME/sessions/…/rollout-…-T.jsonl` has a `turn_context` with model `m-sol`, then `token_count` lines stamped after the run's start; the newest totals are `input 1,000,000, cached 800,000, cache_write 0, output 10,000, reasoning 2,000`. → `progress <run_id> --json` has `usage` with those counts and `cost_usd` `"0.680000"`.
 - [ ] **resumed conversation subtracts what came before (FR79):** the same file also holds a `token_count` stamped before the run's start with totals `input 400,000, cached 300,000, output 5,000`, and the newest totals are `input 1,400,000, cached 1,100,000, output 15,000` → `usage` is `input 1,000,000, cached 800,000, output 10,000` and `cost_usd` is `"0.680000"`.
-- [ ] **band shows the cost (FR80):** progress answers `cost_usd "0.123456"` for a flagged run that has run 95 s and whose newest step is `Reading the diff` → the band line is `agentcli · code-review · hook-stop · 1m 35s · $0.12 · Reading the diff`. With `"0.004000"` it shows `<$0.01`, and with null there is no cost part. This is the line with summaries off or before the first label exists; with a label, the last part is the label (FR91, below).
+- [ ] **band shows the cost (FR80):** progress answers `cost_usd "0.123456"` for a flagged run that has run 95 s and whose newest step is `Reading the diff` → the band line is `agentcli · code-review · hook-stop · 1m 35s · $0.12 · Reading the diff`. With `"0.004000"` it shows `<$0.01`, and with null there is no cost part. This is the line with summaries off; with summaries active the last part is the label, and before the first label the line ends after the cost (FR91, below).
 
 ### Edge cases
 
@@ -279,7 +279,8 @@ Expected costs (US dollars):
 - [ ] **window cap and cut (FR87):** 14 new entries arrive between two reads → one request whose prompt lists the 10 newest, oldest first. An entry of 1,000 characters appears in the prompt as a line of 300 characters.
 - [ ] **agent row streams labels (FR91, FR67):** an agentcli subagent with a surface, the reply `Reading workerlog.go` → the row streams thinking `» Reading workerlog.go` on the first slice after the call settles, and no raw entry is streamed. A slice whose call has not settled streams nothing.
 - [ ] **row never waits on a summary (FR91):** the reply is held open for 20 s → the 5-second slices keep their cadence while it is pending, and the 30-second elapsed-time line still appears.
-- [ ] **band shows the label (FR69, FR80, FR91):** a flagged run, 95 s old, cost `"0.123456"`, label `Reading workerlog.go` → the band line is `agentcli · code-review · hook-stop · 1m 35s · $0.12 · Reading workerlog.go`. Before the first label exists, the last part is the raw newest step.
+- [ ] **band shows the label (FR69, FR80, FR91):** a flagged run, 95 s old, cost `"0.123456"`, label `Reading workerlog.go` → the band line is `agentcli · code-review · hook-stop · 1m 35s · $0.12 · Reading workerlog.go`.
+- [ ] **band before the first label (FR80, FR91, US9):** a flagged run of source `hook-post-commit`, 95 s old, cost `"0.123456"`, its first summary still pending → the band line is `agentcli · code-review · hook-post-commit · 1m 35s · $0.12`, with no step part and no raw entry.
 - [ ] **usage recorded after a reply (FR90):** an answered reply with usage `{input_tokens: 458, output_tokens: 18, …}` → one process runs with argv `[bin, 'usage', 'add', '--session-id', <session id>, '--provider', 'anthropic', '--model', 'claude-haiku-5-5', '--source', 'mod-summary', '--run-id', <run id>, '--json']` and stdin equal to `JSON.stringify(usage)`.
 - [ ] **only billed calls are recorded (FR90):** an `empty-reply` with non-zero usage and an answered reply whose label is rejected (FR89) → both run `usage add`. A completion whose usage is all zero, a rejection of the call, a timeout and a 429 answer → none runs it.
 - [ ] **recording never delays the display (FR90, FR91):** the `usage add` process is held open → the label is shown at once.
@@ -313,11 +314,12 @@ Expected costs (US dollars):
 - [ ] **two in flight per session (FR88):** three flagged runs whose first replies are all held open → at no instant are more than 2 requests pending.
 - [ ] **429 pause (FR88):** a reply that is an `api-error` with status 429 → no request is made for any run for 60 seconds (none at 59 s, even when entries arrive), and a request is made once 60 seconds have passed.
 - [ ] **request deferred under the pause (FR88, FR91):** a label `Reading workerlog.go` is shown on the band, then a 429 answer arrives, then 3 more entries arrive during the pause → no request is made and the band keeps `Reading workerlog.go` (and the row streams nothing new). At 60 s exactly one request is made, whose prompt holds those entries (at most the 10 newest) and the previous label; it is not lost.
-- [ ] **request deferred under the caps (FR88, FR91):** the session already has 2 requests pending and a third run's first entry arrives → the third run's request is not made and its band line shows the raw newest step. When one pending request settles, the third request is made at once with the window as it stands then. For one run whose call is pending while 6 entries arrive, a single request follows its settling, holding the 6 entries (the entries since the last request, at most the 10 newest).
+- [ ] **request deferred under the caps (FR88, FR91):** the session already has 2 requests pending and a third run's first entry arrives → the third run's request is not made and its band line ends after the cost, with no step part. When one pending request settles, the third request is made at once with the window as it stands then. For one run whose call is pending while 6 entries arrive, a single request follows its settling, holding the 6 entries (the entries since the last request, at most the 10 newest).
 - [ ] **label cleaning order (FR89):** the reply `Fi\u0007rst` (an interior control character) → the label `First`. A reply that is only control characters or ANSI sequences → rejected as empty. `First\nSecond` is rejected, not joined into `FirstSecond`.
 - [ ] **label cleaning (FR89):** the reply `\u001b[1mReading workerlog.go\u001b[0m` → the label `Reading workerlog.go`. The reply `  Running store tests  \n` → the label `Running store tests`.
-- [ ] **label rejection (FR89):** each of an empty reply, a whitespace-only reply, `First\nSecond`, `First\r\nSecond`, `# Heading`, a reply starting with a backtick, `*bold*`, `- item`, `> quote`, and a reply of 101 characters → a failure: the raw newest entry is shown, and the call is still recorded (FR90). A reply of exactly 100 characters is accepted.
-- [ ] **failure falls back to raw (FR89, FR91):** a rejection of the call, an answer with `isAnswered: false` and a rejected label, each in turn → the row streams the raw newest entry of that window in place of a label, and the band shows it in place of the old label.
+- [ ] **label rejection (FR89):** each of an empty reply, a whitespace-only reply, `First\nSecond`, `First\r\nSecond`, `# Heading`, a reply starting with a backtick, `*bold*`, `- item`, `> quote`, and a reply of 101 characters → a failure: the row streams nothing after its first line `agentcli · <type>`, no raw entry is shown, the failure is logged once, and the call is still recorded (FR90). A reply of exactly 100 characters is accepted.
+- [ ] **failure keeps the last label (FR89, FR91):** a rejection of the call, an answer with `isAnswered: false` (an `api-error` 500, an `empty-reply`) and a rejected label, each in turn, failing every window of a run → the row streams `agentcli · <type>` and nothing else, no raw entry, and the failure is logged once; the final answer still arrives. The band keeps its old label: `Reading auth.go` shown at 20 s, then three more entries whose request answers an `api-error` 500 → at 30 s the line is still `agentcli · code-review · hook-post-commit · 30s · Reading auth.go`. Before the first label, the line ends after the cost, or after the elapsed time with no cost (a failed first window of a flagged run 20 s old with no cost: `agentcli · code-review · hook-post-commit · 20s`).
+- [ ] **label after a failure (FR89, FR91):** an `api-error` 500 on the first window, then the reply `Running store tests` → the row streams `agentcli · <type>`, then `» Running store tests`, with no raw entry between them.
 - [ ] **failure logged once per run (FR89):** three failures on one run → one debug log line for that run; a first failure on another run → its own line.
 - [ ] **failed recording (FR90):** `usage add` exits 1 twice → the debug log gets one line and `usageAdds` does not move. After one exit 0 it moves by one, and the next failure logs again.
 - [ ] **failed recording is kept and retried on each poll (FR90, FR92):** `usage add` exits 70 → the next poll runs it again with the same argv and the same stdin, and every poll after that until it exits 0. The poll that sees the exit 0 increments `usageAdds` and runs `stats` again before the status line is drawn; later polls do not run `usage add` for it.
@@ -342,6 +344,89 @@ Expected costs (US dollars):
 ### Performance and limits
 
 - [ ] **telemetry volume with model calls (FR81, FR85):** a month file with 20,000 lines, half of them model calls → `stats --all` and `stats --session-id S --all` complete and report them. Record their wall time as a baseline.
+
+## Spawn notice, ETA and spinner
+
+Fixtures for this section:
+- **ETA runs:** run records of the scenario `code-review`, outcome `ok` unless a case says otherwise, written into the current month file of the sandbox home, each with a `cwd` and a `duration_ms`. Module cases hand `EstimateETA` folded runs and a key function that keys a directory by itself unless the case names directories that share a repository.
+- **Directories:** a git repository with one commit, a linked worktree of it in another temp directory, its subdirectory `pkg/deep`, a plain directory outside git, and a path whose directory no longer exists. The repository's key is the real path of the repository followed by `/.git`.
+- **Mod cases:** the session starts with cwd `/work`, and the test clock starts at the Unix epoch. `status` and `eta` answer scripted replies, and the kit records toasts, transcript lines, debug log lines and redraw requests; the spawn tests also watch the writes of `spawnNotified` themselves, through a `state.set` hook. A listing's runs default to `admitted_at` `2026-01-01T00:00:00Z`. Spinner cases run a turn of agent `ag-1` of type `agentcli:second-opinion` beside an `Explore` agent `ag-2`, and draw the engine's `Spinner` with the word `Sauteing` and a request id.
+
+### Happy path
+
+- [ ] **repo basis and JSON (FR94):** six runs of 150000 ms and six of 162000 ms in a plain directory `D` → `agentcli eta --scenario code-review --cwd D --json` exits 0 with stdout exactly `{"sdk_status":"ok","exit_code":0,"scenario":"code-review","repo":"D","basis":"repo","eta_ms":156000,"samples":12,"repos":1}` and a newline, keys in that order.
+- [ ] **worktree and subdirectory share the key (FR94):** a run of 100000 ms in the repository and one of 200000 ms in its worktree → asked from the repository, the worktree and the subdirectory alike, `repo` is the repository's key, `basis: repo`, `eta_ms` 150000, `samples` 2, `repos` 1.
+- [ ] **repo basis ignores other repositories (FR94):** module case, `/work/a` and `/work/a-sub` sharing the key `/work/a/.git`: runs of 100000 ms in `/work/a`, 200000 in `/work/a-sub` and 900000 in `/work/b`, asked from `/work/a` → `basis: repo`, `eta_ms` 150000, `samples` 2, `repos` 1, `repo` `/work/a/.git`.
+- [ ] **global basis is the mean of the repo means (FR94):** module case, the same shared key: runs of 100000 and 200000 ms in `/work/a`, 300000 in `/work/a-sub` and 1000000 in `/work/b`, asked from `/work/c` → `basis: global`, `eta_ms` 600000 (the pooled mean would be 400000), `samples` 4, `repos` 2, `repo` `/work/c`.
+- [ ] **text lines (FR94):** asked from a directory `A`, without `--json`, each exits 0 with one line on stdout:
+  - the twelve runs of the first case in `A` → `ETA ~2m 36s (repo average, 12 runs)`;
+  - eight runs in eight other directories, alternating 140000 and 146000 ms → `ETA ~2m 23s (global average, 8 repos)`;
+  - one run of 59999 ms in `A` → `ETA ~59s (repo average, 1 run)`;
+  - one run of 60000 ms in one other directory → `ETA ~1m 0s (global average, 1 repo)`;
+  - no run → `ETA unknown (no history)`.
+- [ ] **the whole history counts (FR94):** in `D`, a run of 40000 ms recorded 120 days ago and one of 20000 ms an hour ago, in their own month files → `basis: repo`, `eta_ms` 30000, `samples` 2.
+- [ ] **cwd defaults to the working directory (FR94):** a run of 30000 ms in `H` and one of 90000 ms in `O`, then `eta --scenario code-review --json` run from `H` with no `--cwd` → `repo` `H`, `basis: repo`, `eta_ms` 30000.
+- [ ] **spinner says the type (FR95, US10):** a surface, the summary still pending → `ag-1`'s spinner is drawn as `agentcli · second-opinion`, at the turn's first wait and again after its first raw entry is read.
+- [ ] **spinner shows the label (FR95):** the label `Reading auth.go` settles → `ag-1`'s spinner is drawn as `Reading auth.go`, with no `» `.
+- [ ] **redraw on a settled label (FR95):** no redraw is requested before the label settles; after it, the mod has asked once to redraw `ui.render`.
+- [ ] **hook run seen running (FR96, US10):** the first listing holds a running run of scenario `code-review` and source `hook-post-commit`, and `eta` answers `basis: repo, eta_ms 156000, samples 12` → one toast and one transcript line, both `agentcli · spawned code-review · trigger hook-post-commit · ETA ~2m 36s (repo average, 12 runs)`. One `eta` runs, through the plugin's shim, with the arguments `eta --scenario code-review --cwd /work --json`.
+- [ ] **the other ETA texts (FR96, US10):** `eta` answers, in turn:
+  - `basis: global, eta_ms 143000, repos 8` → the line ends `· ETA ~2m 23s (global average, 8 repos)`;
+  - `basis: none` → `· ETA unknown (no history)`;
+  - `basis: repo, eta_ms 59999, samples 1` → `· ETA ~59s (repo average, 1 run)`;
+  - `basis: global, eta_ms 61000, repos 1` → `· ETA ~1m 1s (global average, 1 repo)`.
+- [ ] **ETA lookup given ten seconds (FR96):** the `eta` run of a notice has a timeout of 10000 ms.
+- [ ] **agent type turn announced after admission (FR96):** a turn of an `agentcli:second-opinion` agent, with `eta` held → the turn's answer (`Codex: done.`) arrives before any `eta` runs. Once the timer fires, `eta --scenario second-opinion --cwd /work --json` runs and no toast shows while it is held; when it answers, the toast is `agentcli · spawned second-opinion · trigger agent · ETA ~2m 36s (repo average, 12 runs)`. Two later listings that list the run show no other toast and run no other `eta`.
+- [ ] **ask and send announced with the run's own values (FR96):** for `ask`, then for `send`, with `status` and `eta` held → the tool returns `{conversation_id, run_id}` and no toast has shown. Once the timer fires, the mod runs `status run-1 --json` (the run reports scenario `delegation`, source `mod`), then `eta --scenario delegation --cwd /work --json`, then shows `agentcli · spawned delegation · trigger mod · ETA ~2m 36s (repo average, 12 runs)`. Two later listings of the run show no other toast.
+- [ ] **ask notice starts from a timer (FR96):** right after the `ask` tool returns, no `status` read has run; once the timer advances, the notice shows.
+- [ ] **run first seen finished (FR96, US10):** after an empty first listing, a listing holds a `done` run of source `hook-stop` → a toast and a transcript line, no `eta` run, ending:
+  - `· finished in 3s` with `started_at` `2026-01-01T00:00:01Z` and `ended_at` `2026-01-01T00:00:04Z`;
+  - `· finished in 1m 35s` with no `started_at` and `ended_at` `2026-01-01T00:01:35Z` (counted from `admitted_at`);
+  - `· finished` with no `ended_at`, and with `started_at` `yesterday`.
+
+### Edge cases
+
+- [ ] **every outcome counts, other scenarios do not (FR94):** module case: runs in `/work/a` of 100000 (`ok`), 200000 (`error`), 300000 (`timeout`), 400000 (`lost`), 500000 (`cancelled`) and 600000 ms (no outcome), plus one of another scenario at 90000000 ms → `basis: repo`, `eta_ms` 350000, `samples` 6.
+- [ ] **runs without a cwd or a duration are dropped (FR94):** module case asked from `/work/z`: 100000 (`ok`) and 300000 ms (`error`) in `/work/a`, 600000 (`lost`) in `/work/b`, a run with an empty `cwd` at 90000000, a run of another scenario, a run in `/work/d` with no `duration_ms` and one in `/work/e` with a null one → `basis: global`, `eta_ms` 400000, `samples` 3, `repos` 2.
+- [ ] **none basis (FR94):** no run of the scenario, asked from `D` → exit 0 and stdout exactly `{"sdk_status":"ok","exit_code":0,"scenario":"code-review","repo":"D","basis":"none","eta_ms":null,"samples":0,"repos":0}` and a newline.
+- [ ] **not a repository, directory gone (FR94):** a run of 1000 ms in the plain directory and one of 3000 ms in the gone directory → asked from each, `repo` is that directory string itself, `basis: repo`, `eta_ms` 1000 and 3000, `samples` 1, `repos` 1.
+- [ ] **git cannot run (FR94):** no `git` on `PATH`; a run of 50000 ms in the repository's subdirectory `pkg`, asked from the repository → each directory is its own key: `repo` is the repository directory, `basis: global`, `eta_ms` 50000, `samples` 1, `repos` 1.
+- [ ] **relative --cwd (FR94):** runs of 20000 and 40000 ms in `<P>/project`, then `eta --scenario code-review --cwd project --json` run from `<P>` → `repo` `<P>/project`, `basis: repo`, `eta_ms` 30000, `samples` 2.
+- [ ] **each directory resolved once (FR94):** module case: two runs in `/work/a` and one in `/work/b`, asked from `/work/a` → the key function is called once for each directory.
+- [ ] **half away from zero (FR94):** module case: runs of 1000 and 1001 ms → `eta_ms` 1001.
+- [ ] **other spinners untouched (FR95):** while `ag-1`'s turn runs, the spinners of `ag-2` and of `main` are drawn as `Sauteing`.
+- [ ] **spinner after the turn (FR95):** once `ag-1`'s turn has ended, its spinner is drawn as `Sauteing`.
+- [ ] **spinner without summaries (FR95, FR86):** `summaries: false`, after the first raw entry is read → `ag-1`'s spinner is drawn as `agentcli · second-opinion`, and no model request is made.
+- [ ] **spinner logged once per request id (FR95):** `ag-1`'s spinner drawn twice and `main`'s once → the debug lines that mention the Spinner are exactly `Spinner raised for ag-1 with the word Sauteing` and `Spinner raised for main with the word Sauteing`.
+- [ ] **engine message stays (FR95):** the engine draws `ag-1`'s spinner with the message `Compacting conversation` → it is drawn as `Compacting conversation`.
+- [ ] **baseline (FR96):** the first listing of a load holds a running run and a `done` run with no `ended_at` → only the running one is announced, and one `eta` runs.
+- [ ] **finished runs of the baseline (FR96):** the first listing holds one `done` run of source `hook-stop`, in turn:
+  - ended after the load (`started_at` `1970-01-01T00:00:01Z`, `ended_at` `1970-01-01T00:00:04Z`) → `agentcli · spawned code-review · trigger hook-stop · finished in 3s`;
+  - ended in the load's second (both `1970-01-01T00:00:00Z`) → `… · finished in 0s`;
+  - ended before it (`ended_at` `1969-12-31T23:59:59Z`), with no `ended_at`, or with `ended_at` `yesterday` → no notice.
+  No `eta` runs in any of them.
+- [ ] **load second compared whole (FR96, US10):** the test clock advanced to 100 ms before `session.start`; the first listing holds a `done` run that ended at `1970-01-01T00:00:00Z` and one that ended at `1969-12-31T23:59:59Z` → only the first is announced, `agentcli · spawned code-review · trigger hook-stop · finished in 0s`.
+- [ ] **new baseline at each session start (FR96):** an empty first listing, then a `session.start` within the same load, then a listing with a `done` run never seen → no notice.
+- [ ] **notified ids capped (FR96):** a first listing of 501 `done` runs, `r-500` newest to `r-0` oldest → `spawnNotified` holds 500 ids, `r-500` and `r-1` among them and `r-0` not, and no notice shows.
+- [ ] **every run claimed before any notice (FR96):** the first listing holds a newer `done` run `run-e` and an older running run `run-h`, with `eta` held → while it is held, `spawnNotified` already holds both ids. After it answers, the only toast is `run-h`'s, and the next listing adds none.
+- [ ] **admission and listing announce once (FR96):** an `ask` admission whose `eta` is held, then a listing that lists the same run → the listing runs no second `eta`, and after the release exactly one toast shows.
+- [ ] **two claims together (FR96):** an `ask` admission and a listing claim two runs while the read of `spawnNotified` is held → the second read waits for the first; after the release both notices show and `spawnNotified` holds `run-1` and `run-h`.
+
+### Failure and error handling
+
+- [ ] **missing --scenario (FR94):** `agentcli eta --json` → exit 2 with `sdk_status: usage_error` and `exit_code` 2; `agentcli eta` → exit 2.
+- [ ] **ETA unavailable (FR96, US10):** `eta`, in turn, exits non-zero; prints `ETA ~2m`; prints an object with no known basis; a `repo` average with no `samples`; a `global` average with no `repos`; a count of `-1`; a count of `1.5`; a `repo` average with `eta_ms` null; or is rejected → the toast and the transcript line end `· ETA unavailable`.
+- [ ] **ETA failure logged once per load (FR96):** two runs whose `eta` exits 1 with stderr `agentcli: no git` → two toasts and one debug line, `could not read the ETA of code-review: agentcli exited 1: no git`. After another `session.start`, a third such run adds a second line.
+- [ ] **failed listing logged once until one succeeds (FR96):** the listing exits 1 with stderr `agentcli: store locked`, or is rejected, for three periods → one debug line starting `could not list the runs of the session for spawn notices: ` (`agentcli exited 1: store locked` for the exit). One listing succeeds, then two more fail → a second line.
+- [ ] **incomplete listed run skipped (FR96):** for each of `scenario`, `source` and `state`, the first listing holds `run-h` without it → no toast, and the debug log is exactly `skipped run run-h in the spawn scan: the listing gives it no scenario, source or state`. The next listing gives `run-h` all three → the toast `agentcli · spawned code-review · trigger hook-post-commit · ETA ~2m 36s (repo average, 12 runs)`.
+- [ ] **unreadable listing is a failed scan (FR96):** the listing prints `not json`, then `{"sdk_status":"ok"}` → one debug line, `could not list the runs of the session for spawn notices: the listing could not be read`. A listing with a `done` run then follows → no notice, since it is the baseline.
+- [ ] **status read fails at admission (FR96):** after an `ask`, `status run-1 --json` exits 1 or is rejected → the tool returns its ids, no toast shows and no `eta` runs; the next listing announces `agentcli · spawned delegation · trigger mod · ETA ~2m 36s (repo average, 12 runs)`.
+- [ ] **status read failure logged once per load (FR96):** `status <run_id> --json` exits non-zero, is rejected, prints `not json`, or prints a run with no scenario, for two `ask` admissions → one debug line, starting `could not read run run-1 to announce it: `.
+
+### Idempotency
+
+- [ ] **listings, polls and a reload (FR96, US10):** a running run announced by the first listing, then two more listings and a 15-second poll → one toast, and `spawnNotified` is `['run-h']`. After another `session.start` and two listings, still one toast and one `eta` run.
+- [ ] **announced by an earlier load (FR96):** a run announced in one load; the next load's first listing is empty, then lists the run `done` → no second notice.
 
 ## Edge Cases
 

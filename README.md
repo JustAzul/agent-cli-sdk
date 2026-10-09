@@ -237,6 +237,23 @@ agentcli stats --all --json  # usage_totals, and usage_by_model per model
 agentcli stats --session-id "$CLAUDE_CODE_SESSION_ID"   # one Claude Code session's runs and tokens
 ```
 
+`eta` estimates how long a run of a scenario takes, from the whole history:
+
+```sh
+agentcli eta --scenario code-review                 # ETA ~2m 36s (repo average, 12 runs)
+agentcli eta --scenario code-review --cwd ../api --json
+```
+
+It averages the durations of the scenario's runs, whatever their outcome, in
+the git repository of `--cwd` (default: the current directory), its worktrees
+and subdirectories included. With none there, it takes the mean of each
+repository's mean, so every repository weighs the same
+(`ETA ~2m 23s (global average, 8 repos)`); with no run of the scenario at all,
+it prints `ETA unknown (no history)` and exits 0. `--json` prints one object
+with eight keys: `sdk_status`, `exit_code`, `scenario`, `repo` (the repository
+key of `--cwd`), `basis` (`repo`, `global` or `none`), `eta_ms` (null with no
+history), `samples` and `repos`.
+
 ## Cost
 
 `stats` also reports what the runs would cost at the provider's API list
@@ -291,6 +308,9 @@ background agent:
 - its row shows what the run is doing as a short summary every few steps
   (`» Reading workerlog.go`), with an elapsed-time line when it is quiet; with
   summaries off, the raw steps (commands it starts, text it writes);
+- while its turn runs, the mod sets its spinner's message to the newest
+  summary, or to `agentcli · <type>` until there is one, unless Claude Code has
+  already set a message of its own there;
 - the native completion notification carries the output;
 - a SendMessage to the agent sends the next turn of the same conversation;
 - stopping the agent cancels its run.
@@ -325,8 +345,31 @@ The summaries come from `claude-haiku-5-5` at low effort: the mod sends a
 run's newest steps, each cut to 300 characters, to the Anthropic API through
 the session's own sign-in, on the run's first step and then every three. They
 are skipped when nothing is on screen (`claude -p`), and the plugin's
-`summaries` option turns them off, back to the raw steps. A summary that fails
-shows the raw step instead.
+`summaries` option turns them off, back to the raw steps. While summaries are
+on, no raw step shows in the row or the band: a summary that fails leaves the
+last one in place, and before a run's first summary its band line ends after
+the cost.
+
+Whenever a run of the session starts, whoever started it (an agent type, the
+tools, a hook, the CLI), the mod shows a toast and writes one line in the
+transcript, once per run:
+
+```
+agentcli · spawned code-review · trigger hook-post-commit · ETA ~2m 36s (repo average, 12 runs)
+```
+
+The ETA comes from `agentcli eta` (see [Telemetry](#telemetry)): the mean
+duration of the same scenario's runs in the session's repository, else the mean
+of the per-repository means (`ETA ~2m 23s (global average, 8 repos)`), else
+`ETA unknown (no history)`. `ETA unavailable` means `eta` failed, gave no
+answer within 10 seconds, or printed something the mod could not read. The mod
+looks for runs started outside it every 5 seconds, in the session's 20 newest
+runs, so when more than 20 runs start between two looks, the oldest of those it
+did not start itself get no notice. A run that has already ended when it is
+found is announced as `finished in 3s`, with no ETA. In the first look after
+the mod loads, though, a run that ended before the second the mod loaded in is
+not announced. The notices for the agent types and the tools never hold up the
+tool result or the agent's turn.
 
 The status line counts the session's running jobs and shows what the
 session's runs cost, hook runs included, and what the mod's own model calls
